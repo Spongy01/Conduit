@@ -18,6 +18,12 @@ class ChatCompletionRequest(BaseModel):
     stream: Optional[bool]
     max_tokens: Optional[int]
 
+class Usage(BaseModel):
+    """Token counts — this is what Budget settles against."""
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
 class ChatCompletionResponse(BaseModel):
     """
     Represents a response from a chat completion request.
@@ -25,3 +31,7 @@ class ChatCompletionResponse(BaseModel):
     model: str
     full_response: Optional[str]
     delta: Optional[str]
+    finish_reason: Optional[str] = None
+    usage: Optional[Usage] = None
+
+
