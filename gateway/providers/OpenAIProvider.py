@@ -1,4 +1,4 @@
-from base import BaseProvider
+from gateway.providers.BaseProvider import BaseProvider
 from schema import ChatCompletionRequest, ChatCompletionResponse
 from typing import AsyncGenerator
 import httpx
