@@ -1,9 +1,11 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from gateway.core.schema import ChatCompletionRequest
 from gateway.providers.BaseProvider import BaseProvider
 from gateway.providers.OpenAIProvider import OpenAIProvider
 from fastapi.responses import StreamingResponse
 from fastapi import HTTPException
+from gateway.auth.authenticate import authenticate
+
 router = APIRouter()
 
 async def return_streaming_response(request: ChatCompletionRequest, provider: BaseProvider):
@@ -17,7 +19,8 @@ async def return_streaming_response(request: ChatCompletionRequest, provider: Ba
 
 
 @router.post("/v1/chat/completion")
-async def chat_completion(request: ChatCompletionRequest):
+async def chat_completion(request: ChatCompletionRequest,
+                          team: dict = Depends(authenticate)):
     """
     Endpoint to handle chat completion requests.
     This endpoint receives a ChatCompletionRequest, processes it, and returns the generated response.
