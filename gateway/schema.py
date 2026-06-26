@@ -31,7 +31,7 @@ class ChatCompletionResponse(BaseModel):
     model: str
     full_response: Optional[str]= None
     delta: Optional[str] = None
-    # finish_reason: Optional[str] = None
-    # usage: Optional[Usage] = None
+    finish_reason: Optional[str] = None
+    usage: Optional[Usage] = None
 
 
