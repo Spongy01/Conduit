@@ -1,7 +1,9 @@
-from fastAPI import APIRouter
-from schema import ChatCompletionRequest
-from providers import OpenAIProvider, BaseProvider
+from fastapi import APIRouter
+from gateway.schema import ChatCompletionRequest
+from gateway.providers.BaseProvider import BaseProvider
+from gateway.providers.OpenAIProvider import OpenAIProvider
 from fastapi.responses import StreamingResponse
+from fastapi import HTTPException
 router = APIRouter()
 
 async def return_streaming_response(request: ChatCompletionRequest, provider: BaseProvider):
@@ -30,5 +32,14 @@ async def chat_completion(request: ChatCompletionRequest):
         return StreamingResponse(return_streaming_response(request, provider))
     
     # Non-streaming mode: Call OpenAIProvider for chat_completion and return the response.
+    response_list = []
     async for response in provider.generate(request):
-        return response
+        response_list.append(response.model_dump())
+    
+    if len(response_list) == 0:
+        raise HTTPException(status_code=500, detail="No response generated.")
+    if len(response_list) == 1:
+        return response_list[0]
+    
+    # should not have more than 1 response in non-streaming mode, but if it does, return error
+    raise HTTPException(status_code=500, detail="Multiple responses generated in non-streaming mode.")
