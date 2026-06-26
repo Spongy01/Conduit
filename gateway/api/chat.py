@@ -5,6 +5,8 @@ from gateway.providers.OpenAIProvider import OpenAIProvider
 from fastapi.responses import StreamingResponse
 from fastapi import HTTPException
 from gateway.auth.authenticate import authenticate
+from gateway.policy.model_access import raise_if_model_not_allowed
+from gateway.router.router import route_request
 
 router = APIRouter()
 
@@ -25,16 +27,22 @@ async def chat_completion(request: ChatCompletionRequest,
     Endpoint to handle chat completion requests.
     This endpoint receives a ChatCompletionRequest, processes it, and returns the generated response.
     """
+    # Check if the requested model is allowed for the team
+    raise_if_model_not_allowed(request, team)
 
     # Skeletal implementation for handling the chat completion request.
-    #Call OpenAIProvider for chat_completion and return the response.
-    stream = request.stream or False
-    provider = OpenAIProvider(api_key="YOUR_API_KEY")
+    
+    # get provider from router
+    provider = route_request(request, team)
+    
+    #streaming status
+    stream = request.stream
 
+    # Streaming mode: Return a streaming response if requested.
     if stream:
         return StreamingResponse(return_streaming_response(request, provider))
     
-    # Non-streaming mode: Call OpenAIProvider for chat_completion and return the response.
+    # Non-streaming mode: Call the provider for chat_completion and return the response.
     response_list = []
     async for response in provider.generate(request):
         response_list.append(response.model_dump())
