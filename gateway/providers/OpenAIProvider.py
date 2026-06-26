@@ -1,6 +1,7 @@
 from gateway.providers.BaseProvider import BaseProvider
-from schema import ChatCompletionRequest, ChatCompletionResponse
+from gateway.schema import ChatCompletionRequest, ChatCompletionResponse
 from typing import AsyncGenerator
+from fastapi import HTTPException
 import httpx
 import json
 
@@ -44,10 +45,12 @@ class OpenAIProvider(BaseProvider):
                 json=payload,
             ) as response:
 
-                if response.status_code != 200:
+                if response.status_code != 200 and request.stream is False:
                     text = await response.aread()
-                    raise Exception(f"OpenAI API error {response.status_code}: {text}")
-
+                    raise HTTPException(status_code=response.status_code, detail=f"OpenAI API error: {text}")
+                if response.status_code != 200 and request.stream is True:
+                    text = await response.aread()
+                    yield ChatCompletionResponse(model=model, delta=f"OpenAI API error: {text}")
                 # =========================
                 # STREAMING MODE
                 # =========================
