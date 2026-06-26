@@ -3,6 +3,7 @@ from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse
 from typing import AsyncGenerator
 import httpx
 import json
+from fastapi import HTTPException
 
 class AnthropicProvider(BaseProvider):
     def __init__(self, api_key: str):
@@ -48,10 +49,12 @@ class AnthropicProvider(BaseProvider):
                 json=payload,
             ) as response:
 
-                if response.status_code != 200:
+                if response.status_code != 200 and request.stream is False:
                     text = await response.aread()
-                    raise Exception(f"Anthropic API error {response.status_code}: {text}")
-
+                    raise HTTPException(status_code=response.status_code, detail=f"Anthropic API error: {text}")
+                if response.status_code != 200 and request.stream is True:
+                    text = await response.aread()
+                    yield ChatCompletionResponse(model=model, delta=f"Anthropic API error: {text}")
                 # =========================
                 # STREAMING MODE
                 # =========================

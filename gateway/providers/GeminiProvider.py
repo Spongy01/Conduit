@@ -3,6 +3,7 @@ from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse
 from typing import AsyncGenerator
 import httpx
 import json
+from fastapi import HTTPException
 
 class GeminiProvider(BaseProvider):
     def __init__(self, api_key: str):
@@ -46,10 +47,12 @@ class GeminiProvider(BaseProvider):
         async with httpx.AsyncClient(timeout=None) as client:
             async with client.stream("POST", url, headers=headers, json=payload) as response:
 
-                if response.status_code != 200:
+                if response.status_code != 200 and request.stream is False:
                     text = await response.aread()
-                    raise Exception(f"Gemini API error {response.status_code}: {text}")
-
+                    raise HTTPException(status_code=response.status_code, detail=f"Gemini API error: {text}")
+                if response.status_code != 200 and request.stream is True:
+                    text = await response.aread()
+                    yield ChatCompletionResponse(model=model, delta=f"Gemini API error: {text}")
                 # =========================
                 # STREAMING MODE
                 # =========================
