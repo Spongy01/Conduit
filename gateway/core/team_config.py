@@ -44,6 +44,66 @@ TEAMS = {
     },
 }
 
+def create_team(
+        api_key: str,
+        team_id: str,
+        team_name: str,
+        allowed_models: list[str],
+        rate_limit: int,
+        budget_limit: float,
+        budget_period: str = "monthly",
+)-> dict:
+    """
+    Adds a new team to the source of truth (the stub dict for now,
+    Postgres later). No Redis touch needed: a brand-new key has never
+    been read before, so it's a guaranteed cache miss on first use,
+    and get_team_config's existing miss-path already populates the
+    cache correctly at that point.
+    """
+    if api_key in TEAMS:
+        raise ValueError(f"API key {api_key} already exists")
+
+    TEAMS[api_key] = {
+        "team_id": team_id,
+        "team_name": team_name,
+        "allowed_models": allowed_models,
+        "rate_limit": rate_limit,
+        "budget_limit": budget_limit,
+        "budget_period": budget_period,
+    }
+
+    return get_team_config(api_key)
+
+
+# update key data function
+
+def update_team(api_key: str, **fields) -> dict:
+    if api_key not in TEAMS:
+        raise ValueError(f"API key {api_key} does not exist")
+
+    for field, value in fields.items():
+        if field in TEAMS[api_key]:
+            if field == "allowed_models":
+                # Ensure that the allowed models are valid
+                for model in value:
+                    if model not in MODELS:
+                        raise ValueError(f"Model {model} is not recognized")
+            TEAMS[api_key][field] = value
+    # TODO once Redis is real: overwrite this team's cached entry with
+    # the freshly resolved config, e.g. redis.set(api_key, get_team_config(api_key))
+ 
+    return get_team_config(api_key)
+
+
+# revoke key function
+
+def revoke_team(api_key: str) -> None:
+    if api_key not in TEAMS:
+        raise ValueError(f"API key {api_key} does not exist")
+
+    del TEAMS[api_key]
+    # TODO once Redis is real: delete this team's cached entry, e.g. redis.delete(api_key)
+    
 
 def get_team_config(api_key: str) -> dict | None:
     """
