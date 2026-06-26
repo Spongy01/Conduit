@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import AsyncGenerator
-from gateway.schema import ChatCompletionRequest, ChatCompletionResponse
+from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse
 
 class BaseProvider(ABC):
     

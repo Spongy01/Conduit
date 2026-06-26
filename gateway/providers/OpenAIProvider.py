@@ -1,5 +1,5 @@
 from gateway.providers.BaseProvider import BaseProvider
-from gateway.schema import ChatCompletionRequest, ChatCompletionResponse
+from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse
 from typing import AsyncGenerator
 from fastapi import HTTPException
 import httpx

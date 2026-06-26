@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from gateway.schema import ChatCompletionRequest
+from gateway.core.schema import ChatCompletionRequest
 from gateway.providers.BaseProvider import BaseProvider
 from gateway.providers.OpenAIProvider import OpenAIProvider
 from fastapi.responses import StreamingResponse
