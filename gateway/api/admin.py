@@ -1,7 +1,9 @@
 from gateway.auth.admin import require_admin
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from gateway.core.team_config import create_team, update_team, revoke_team, add_model, update_model, delete_model
+from gateway.core.model_catalog import add_model, update_model, delete_model
+from gateway.core.team_config import create_team, update_team, revoke_team
+
 # Admin API endpoint to add API keys, revoke them or update them
 
 router = APIRouter()
