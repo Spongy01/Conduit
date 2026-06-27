@@ -103,7 +103,7 @@ def revoke_team(api_key: str) -> None:
 
     del TEAMS[api_key]
     # TODO once Redis is real: delete this team's cached entry, e.g. redis.delete(api_key)
-    
+
 
 def get_team_config(api_key: str) -> dict | None:
     """
