@@ -45,7 +45,7 @@ TEAMS = {
     },
 }
 
-def create_team(
+async def create_team(
         api_key: str,
         team_id: str,
         team_name: str,
@@ -62,38 +62,38 @@ def create_team(
     cache correctly at that point.
     """
     try:
-        db.create_team(
+        await db.create_team(
             api_key, team_id, team_name, allowed_models, rate_limit, budget_limit, budget_period
         )
     except ValueError as e:
         raise ValueError(str(e))
-    return get_team_config(api_key)
+    return await get_team_config(api_key)
 
 
 # update key data function
 
-def update_team(api_key: str, **fields) -> dict:
+async def update_team(api_key: str, **fields) -> dict:
     
     try:
-        db.update_team(api_key, **fields)
+        await db.update_team(api_key, **fields)
     except ValueError as e:
         raise ValueError(str(e))
 
-    return get_team_config(api_key)
+    return await get_team_config(api_key)
 
 
 # revoke key function
 
-def revoke_team(api_key: str) -> None:
+async def revoke_team(api_key: str) -> None:
     try:
-        db.revoke_team(api_key)
+        await db.revoke_team(api_key)
     except ValueError as e:
         raise ValueError(str(e))
 
 
 
-def get_team_config(api_key: str) -> dict | None:
+async def get_team_config(api_key: str) -> dict | None:
     """
     Returns the team configuration if it exists, otherwise returns None.
     """
-    return db.get_team(api_key)
+    return await db.get_team(api_key)
