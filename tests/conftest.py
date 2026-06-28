@@ -33,27 +33,22 @@ CREATE_MODELS_TABLE = """
 """
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(autouse=True)
 async def db_conn():
     conn = await asyncpg.connect(TEST_DATABASE_URL)
     await conn.execute(CREATE_TEAMS_TABLE)
     await conn.execute(CREATE_MODELS_TABLE)
     yield conn
+    await conn.execute("TRUNCATE teams, models")
     await conn.close()
 
 
-@pytest_asyncio.fixture(autouse=True)
-async def truncate_tables(db_conn):
-    yield
-    await db_conn.execute("TRUNCATE teams, models")
-
-
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture
 async def client():
     async with httpx.AsyncClient(base_url=TEST_APP_URL) as c:
         yield c
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def admin_headers():
     return {"X-Admin-Key": ADMIN_API_KEY}
