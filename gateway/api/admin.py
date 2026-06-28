@@ -35,26 +35,26 @@ class CreateModelRequest(BaseModel):
 #### Endpoints for Managing Teams ####
 ######################################
 
-@router.post("v1/teams", dependencies=[Depends(require_admin)])
-def create_team_endpoint(request: CreateTeamRequest):
+@router.post("/v1/teams", dependencies=[Depends(require_admin)])
+async def create_team_endpoint(request: CreateTeamRequest):
     try:
-        return create_team(**request.model_dump())
+        return await create_team(**request.model_dump())
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-       
 
-@router.patch("v1/teams/{api_key}", dependencies=[Depends(require_admin)])
-def update_team_endpoint(api_key: str, request: UpdateTeamRequest):
+
+@router.patch("/v1/teams/{api_key}", dependencies=[Depends(require_admin)])
+async def update_team_endpoint(api_key: str, request: UpdateTeamRequest):
     try:
-        return update_team(api_key, **request.model_dump(exclude_unset=True))
+        return await update_team(api_key, **request.model_dump(exclude_unset=True))
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    
- 
-@router.delete("v1/teams/{api_key}", dependencies=[Depends(require_admin)])
-def revoke_team_endpoint(api_key: str):
+
+
+@router.delete("/v1/teams/{api_key}", dependencies=[Depends(require_admin)])
+async def revoke_team_endpoint(api_key: str):
     try:
-        revoke_team(api_key)
+        await revoke_team(api_key)
         return {"status": "revoked", "api_key": api_key}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -64,24 +64,26 @@ def revoke_team_endpoint(api_key: str):
 ### Endpoints for Managing Models ###
 #####################################
 
-@router.post("v1/models", dependencies=[Depends(require_admin)])
-def create_model_endpoint(request: CreateModelRequest):
+@router.post("/v1/models", dependencies=[Depends(require_admin)])
+async def create_model_endpoint(request: CreateModelRequest):
     try:
-        return add_model(**request.model_dump())
+        return await add_model(**request.model_dump())
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.patch("v1/models/{model_name}", dependencies=[Depends(require_admin)])
-def update_model_endpoint(model_name: str, request: CreateModelRequest):
+@router.patch("/v1/models/{model_name}", dependencies=[Depends(require_admin)])
+async def update_model_endpoint(model_name: str, request: CreateModelRequest):
     try:
-        return update_model(model_name, **request.model_dump(exclude_unset=True))
+        fields = request.model_dump(exclude_unset=True)
+        fields.pop("model_name", None)
+        return await update_model(model_name, **fields)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-@router.delete("v1/models/{model_name}", dependencies=[Depends(require_admin)])
-def delete_model_endpoint(model_name: str):
+@router.delete("/v1/models/{model_name}", dependencies=[Depends(require_admin)])
+async def delete_model_endpoint(model_name: str):
     try:
-        delete_model(model_name)
+        await delete_model(model_name)
         return {"status": "deleted", "model_name": model_name}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
