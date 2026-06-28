@@ -1,3 +1,4 @@
+from gateway.core.database import db
 # Dummy stand-ins for what will eventually be two Postgres tables.
 # Swap these for real DB reads later without changing get_team_config's
 # return shape or its callers.
@@ -60,75 +61,39 @@ def create_team(
     and get_team_config's existing miss-path already populates the
     cache correctly at that point.
     """
-    if api_key in TEAMS:
-        raise ValueError(f"API key {api_key} already exists")
-
-    TEAMS[api_key] = {
-        "team_id": team_id,
-        "team_name": team_name,
-        "allowed_models": allowed_models,
-        "rate_limit": rate_limit,
-        "budget_limit": budget_limit,
-        "budget_period": budget_period,
-    }
-
+    try:
+        db.create_team(
+            api_key, team_id, team_name, allowed_models, rate_limit, budget_limit, budget_period
+        )
+    except ValueError as e:
+        raise ValueError(str(e))
     return get_team_config(api_key)
 
 
 # update key data function
 
 def update_team(api_key: str, **fields) -> dict:
-    if api_key not in TEAMS:
-        raise ValueError(f"API key {api_key} does not exist")
+    
+    try:
+        db.update_team(api_key, **fields)
+    except ValueError as e:
+        raise ValueError(str(e))
 
-    for field, value in fields.items():
-        if field in TEAMS[api_key]:
-            if field == "allowed_models":
-                # Ensure that the allowed models are valid
-                for model in value:
-                    if model not in MODELS:
-                        raise ValueError(f"Model {model} is not recognized")
-            TEAMS[api_key][field] = value
-    # TODO once Redis is real: overwrite this team's cached entry with
-    # the freshly resolved config, e.g. redis.set(api_key, get_team_config(api_key))
- 
     return get_team_config(api_key)
 
 
 # revoke key function
 
 def revoke_team(api_key: str) -> None:
-    if api_key not in TEAMS:
-        raise ValueError(f"API key {api_key} does not exist")
+    try:
+        db.revoke_team(api_key)
+    except ValueError as e:
+        raise ValueError(str(e))
 
-    del TEAMS[api_key]
-    # TODO once Redis is real: delete this team's cached entry, e.g. redis.delete(api_key)
 
 
 def get_team_config(api_key: str) -> dict | None:
     """
-    Stub for the real get_team_config. Mimics the fully-resolved shape
-    the real function should return once Redis + Postgres are wired in:
-    one lookup, allowed_models already joined with provider info, no
-    further DB/cache calls needed by any caller.
-
-    Returns None if the key doesn't exist (caller should treat as 401).
+    Returns the team configuration if it exists, otherwise returns None.
     """
-    team = TEAMS.get(api_key)
-    if team is None:
-        return None
-
-    resolved_models = [
-        {"name": name, **MODELS[name]}
-        for name in team["allowed_models"]
-        if name in MODELS
-    ]
-
-    return {
-        "team_id": team["team_id"],
-        "team_name": team["team_name"],
-        "allowed_models": resolved_models,
-        "rate_limit": team["rate_limit"],
-        "budget_limit": team["budget_limit"],
-        "budget_period": team["budget_period"],
-    }
+    return db.get_team(api_key)

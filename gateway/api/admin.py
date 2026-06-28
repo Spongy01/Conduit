@@ -10,7 +10,6 @@ router = APIRouter()
 
 class CreateTeamRequest(BaseModel):
     api_key: str
-    allowed_models: list[dict]  # List of dicts with 'name' and 'provider' keys
     team_id: str
     team_name: str
     allowed_models: list[str]
