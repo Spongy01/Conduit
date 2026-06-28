@@ -1,0 +1,14 @@
+services:
+  postgres-test:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: conduit
+      POSTGRES_PASSWORD: postgres_conduit
+      POSTGRES_DB: conduit
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_test_data:
