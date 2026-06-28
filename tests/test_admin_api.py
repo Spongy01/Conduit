@@ -58,7 +58,7 @@ async def test_update_team_not_found(client, admin_headers):
         json={"team_name": "Ghost"},
         headers=admin_headers,
     )
-    assert r.status_code == 400
+    assert r.status_code == 404
     assert "does not exist" in r.json()["detail"]
 
 

@@ -48,7 +48,7 @@ def update_team_endpoint(api_key: str, request: UpdateTeamRequest):
     try:
         return update_team(api_key, **request.model_dump(exclude_unset=True))
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e))
     
  
 @router.delete("v1/teams/{api_key}", dependencies=[Depends(require_admin)])
