@@ -10,7 +10,7 @@ async def authenticate(authorization: str = Header()) -> dict:
         raise HTTPException(status_code=401, detail="Missing or malformed Authorization header")
 
     api_key = authorization.removeprefix("Bearer ")
-    team = get_team_config(api_key)
+    team = await get_team_config(api_key)
 
     if team is None:
         raise HTTPException(status_code=401, detail="Invalid API key")

@@ -95,5 +95,24 @@ async def revoke_team(api_key: str) -> None:
 async def get_team_config(api_key: str) -> dict | None:
     """
     Returns the team configuration if it exists, otherwise returns None.
+    Enriches allowed_models from a flat list of name strings into a list of
+    dicts with full model data (name, provider, costs), matching the shape
+    the old in-memory TEAMS/MODELS dicts used to produce.
     """
-    return await db.get_team(api_key)
+    team = await db.get_team(api_key)
+    if team is None:
+        return None
+
+    enriched_models = []
+    for model_name in team["allowed_models"]:
+        model = await db.get_model(model_name)
+        if model:
+            enriched_models.append({
+                "name": model["name"],
+                "provider": model["provider"],
+                "cost_per_input_token": model["cost_per_input_token"],
+                "cost_per_output_token": model["cost_per_output_token"],
+            })
+
+    team["allowed_models"] = enriched_models
+    return team
