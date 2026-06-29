@@ -3,12 +3,14 @@ from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse
 from typing import AsyncGenerator
 import httpx
 import json
+import os
 from fastapi import HTTPException
 
 class GeminiProvider(BaseProvider):
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.base_url = "https://generativelanguage.googleapis.com/v1beta/models"
+        _base = os.environ.get("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
+        self.base_url = f"{_base}/v1beta/models"
 
     async def generate(self, request: ChatCompletionRequest) -> AsyncGenerator[ChatCompletionResponse, None]:
         model = request.model

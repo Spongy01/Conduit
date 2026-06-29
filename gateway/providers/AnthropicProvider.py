@@ -3,11 +3,13 @@ from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse
 from typing import AsyncGenerator
 import httpx
 import json
+import os
 from fastapi import HTTPException
 
 class AnthropicProvider(BaseProvider):
     def __init__(self, api_key: str):
         self.api_key = api_key
+        self._base_url = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
 
     async def generate(self, request: ChatCompletionRequest) -> AsyncGenerator[ChatCompletionResponse, None]:
         model = request.model
@@ -44,7 +46,7 @@ class AnthropicProvider(BaseProvider):
         async with httpx.AsyncClient(timeout=None) as client:
             async with client.stream(
                 "POST",
-                "https://api.anthropic.com/v1/messages",
+                f"{self._base_url}/v1/messages",
                 headers=headers,
                 json=payload,
             ) as response:

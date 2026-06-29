@@ -4,10 +4,12 @@ from typing import AsyncGenerator
 from fastapi import HTTPException
 import httpx
 import json
+import os
 
 class OpenAIProvider(BaseProvider):
     def __init__(self, api_key: str):
         self.api_key = api_key
+        self._base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com")
 
     async def generate(self, request: ChatCompletionRequest) -> AsyncGenerator[ChatCompletionResponse, None]:
         """
@@ -40,7 +42,7 @@ class OpenAIProvider(BaseProvider):
         async with httpx.AsyncClient(timeout=None) as client:
             async with client.stream(
                 "POST",
-                "https://api.openai.com/v1/chat/completions",
+                f"{self._base_url}/v1/chat/completions",
                 headers=headers,
                 json=payload,
             ) as response:
