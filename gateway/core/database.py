@@ -8,7 +8,10 @@ class Database:
         self.pool = None
 
     async def connect(self):
-        self.pool = await asyncpg.create_pool(dsn=self.dsn)
+        self.pool = await asyncpg.create_pool(
+                dsn=self.dsn, 
+                min_size=5,
+                max_size=25)
 
     async def disconnect(self):
         if self.pool:
