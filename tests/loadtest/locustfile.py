@@ -36,7 +36,7 @@ def _post(client, key: str, model: str, stream: bool = True):
 
 # team-alpha: gpt-4o, gpt-4o-mini  (rate_limit 100, budget $50)
 class AlphaUser(HttpUser):
-    wait_time = between(1, 3)
+    wait_time = between(0.5, 1.5)
 
     @task(3)
     def gpt4o_stream(self):
