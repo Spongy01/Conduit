@@ -10,7 +10,7 @@ async def lifespan(app: FastAPI):
     # Startup code: Initialize the database connection pool
     await db.connect()
     # Startup code: Initialize the Redis client
-    await redis_client.connect()
+    redis_client.connect()
     yield
     # Shutdown code: Close the database connection pool
     await db.disconnect()

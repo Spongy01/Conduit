@@ -1,4 +1,5 @@
 from gateway.core.database import db
+from gateway.core import cache
 # Dummy stand-ins for what will eventually be two Postgres tables.
 # Swap these for real DB reads later without changing get_team_config's
 # return shape or its callers.
@@ -78,8 +79,12 @@ async def update_team(api_key: str, **fields) -> dict:
         await db.update_team(api_key, **fields)
     except ValueError as e:
         raise ValueError(str(e))
+    
+    await cache.delete_team_config(api_key)  # Invalidate the cache for this team
 
     return await get_team_config(api_key)
+
+
 
 
 # revoke key function
@@ -89,6 +94,8 @@ async def revoke_team(api_key: str) -> None:
         await db.revoke_team(api_key)
     except ValueError as e:
         raise ValueError(str(e))
+    
+    await cache.delete_team_config(api_key)  # Invalidate the cache for this team
 
 
 
@@ -99,10 +106,23 @@ async def get_team_config(api_key: str) -> dict | None:
     dicts with full model data (name, provider, costs), matching the shape
     the old in-memory TEAMS/MODELS dicts used to produce.
     """
+
+    # check cache
+    cached_team = await cache.get_team_config(api_key)
+    if cached_team is not None:
+        # print(f"Cache hit for API key: {api_key}")
+        # check if status field is in cached_team and if it is 'not_found'
+        if "status" in cached_team and cached_team["status"] == "not_found":
+            return None
+        return cached_team
+    
+    # print(f"Cache miss for API key: {api_key}")
+    # cache hit failed, fetch from database
+
     team = await db.get_team(api_key)
     if team is None:
+        await cache.set_team_config(api_key, {'status': 'not_found'})  # Cache the miss to avoid repeated DB hits
         return None
-
     enriched_models = []
     for model_name in team["allowed_models"]:
         model = await db.get_model(model_name)
@@ -115,4 +135,7 @@ async def get_team_config(api_key: str) -> dict | None:
             })
 
     team["allowed_models"] = enriched_models
+
+    await cache.set_team_config(api_key, team)  # Update cache with enriched team config
+
     return team

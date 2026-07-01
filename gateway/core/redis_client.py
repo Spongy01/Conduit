@@ -18,6 +18,7 @@ class RedisClient:
 
     def get_client(self):
         if self.client is None:
+            # print("Redis client is not connected. Call connect() first.")
             raise Exception("Redis client is not connected. Call connect() first.")
         return self.client
     
@@ -41,6 +42,7 @@ class RedisClient:
     
     async def hgetall(self, key:str):
         client = self.get_client()
+        # print(f"Getting all fields for key: {key}")
         return await client.hgetall(key)
 
     async def hget(self, key:str, field:str):
