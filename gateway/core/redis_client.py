@@ -48,4 +48,4 @@ class RedisClient:
         return await client.hget(key, field)
 
 
-redis_client = RedisClient()
+redis_client = RedisClient()                  
