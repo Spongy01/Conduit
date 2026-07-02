@@ -3,8 +3,11 @@ from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse
 from typing import AsyncGenerator
 import httpx
 import json
+import logging
 import os
 from fastapi import HTTPException
+
+logger = logging.getLogger(__name__)
 
 class GeminiProvider(BaseProvider):
     def __init__(self, api_key: str):
@@ -46,14 +49,18 @@ class GeminiProvider(BaseProvider):
         else:
             url = f"{self.base_url}/{model}:generateContent?key={self.api_key}"
 
+        logger.debug("Calling Gemini API model=%s stream=%s", model, stream)
+
         async with httpx.AsyncClient(timeout=None) as client:
             async with client.stream("POST", url, headers=headers, json=payload) as response:
 
                 if response.status_code != 200 and request.stream is False:
                     text = await response.aread()
+                    logger.error("Gemini API error status=%s model=%s: %s", response.status_code, model, text)
                     raise HTTPException(status_code=response.status_code, detail=f"Gemini API error: {text}")
                 if response.status_code != 200 and request.stream is True:
                     text = await response.aread()
+                    logger.error("Gemini API error status=%s model=%s: %s", response.status_code, model, text)
                     yield ChatCompletionResponse(model=model, delta=f"Gemini API error: {text}")
                 # =========================
                 # STREAMING MODE
@@ -88,4 +95,5 @@ class GeminiProvider(BaseProvider):
                         full["candidates"][0]["content"]["parts"][0]["text"]
                     )
 
+                    logger.debug("Gemini API response received model=%s", model)
                     yield ChatCompletionResponse(model=model, full_response=content)

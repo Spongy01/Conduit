@@ -3,7 +3,10 @@ from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse
 from typing import AsyncGenerator
 import httpx
 import json
+import logging
 from fastapi import HTTPException
+
+logger = logging.getLogger(__name__)
 
 class OllamaProvider(BaseProvider):
     def __init__(self, base_url: str):
@@ -28,14 +31,18 @@ class OllamaProvider(BaseProvider):
         headers = {"Content-Type": "application/json"}
         url = f"{self.base_url}/api/chat"
 
+        logger.debug("Calling Ollama API model=%s stream=%s", model, stream)
+
         async with httpx.AsyncClient(timeout=None) as client:
             async with client.stream("POST", url, headers=headers, json=payload) as response:
 
                 if response.status_code != 200 and request.stream is False:
                     text = await response.aread()
+                    logger.error("Ollama API error status=%s model=%s: %s", response.status_code, model, text)
                     raise HTTPException(status_code=response.status_code, detail=f"Ollama API error: {text}")
                 if response.status_code != 200 and request.stream is True:
                     text = await response.aread()
+                    logger.error("Ollama API error status=%s model=%s: %s", response.status_code, model, text)
                     yield ChatCompletionResponse(model=model, delta=f"Ollama API error: {text}")
                 # =========================
                 # STREAMING MODE
@@ -63,4 +70,5 @@ class OllamaProvider(BaseProvider):
 
                     content = full["message"]["content"]
 
+                    logger.debug("Ollama API response received model=%s", model)
                     yield ChatCompletionResponse(model=model, full_response=content)

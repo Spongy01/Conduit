@@ -4,7 +4,10 @@ from typing import AsyncGenerator
 from fastapi import HTTPException
 import httpx
 import json
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 class OpenAIProvider(BaseProvider):
     def __init__(self, api_key: str):
@@ -39,6 +42,8 @@ class OpenAIProvider(BaseProvider):
             "Content-Type": "application/json",
         }
 
+        logger.debug("Calling OpenAI API model=%s stream=%s", model, stream)
+
         async with httpx.AsyncClient(timeout=None) as client:
             async with client.stream(
                 "POST",
@@ -49,9 +54,11 @@ class OpenAIProvider(BaseProvider):
 
                 if response.status_code != 200 and request.stream is False:
                     text = await response.aread()
+                    logger.error("OpenAI API error status=%s model=%s: %s", response.status_code, model, text)
                     raise HTTPException(status_code=response.status_code, detail=f"OpenAI API error: {text}")
                 if response.status_code != 200 and request.stream is True:
                     text = await response.aread()
+                    logger.error("OpenAI API error status=%s model=%s: %s", response.status_code, model, text)
                     yield ChatCompletionResponse(model=model, delta=f"OpenAI API error: {text}")
                 # =========================
                 # STREAMING MODE
@@ -88,6 +95,7 @@ class OpenAIProvider(BaseProvider):
                         ["message"]["content"]
                     )
 
+                    logger.debug("OpenAI API response received model=%s", model)
                     yield ChatCompletionResponse(
                         model=model,
                         full_response=content

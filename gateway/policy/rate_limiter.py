@@ -1,5 +1,8 @@
+import logging
 import time
 from gateway.core.redis_client import redis_client
+
+logger = logging.getLogger(__name__)
 
 LUA_SCRIPT = """
 local value = redis.call('HGET', KEYS[1], 'tokens_remaining')
@@ -36,5 +39,10 @@ async def check_rate_limit(team_id: str, capacity: int, fill_rate: float) -> boo
         capacity,
         fill_rate,
     )
-    
+
+    logger.debug(
+        "Rate limit check team_id=%s capacity=%s fill_rate=%s lua_result=%s",
+        team_id, capacity, fill_rate, result,
+    )
+
     return result == 1
