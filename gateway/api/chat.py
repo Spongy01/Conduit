@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from fastapi import HTTPException
 from gateway.auth.authenticate import authenticate
 from gateway.policy.model_access import raise_if_model_not_allowed
+from gateway.policy.rate_limiter import check_rate_limit
 from gateway.router.router import route_request
 
 router = APIRouter()
@@ -29,9 +30,18 @@ async def chat_completion(request: ChatCompletionRequest,
     """
     # Check if the requested model is allowed for the team
     raise_if_model_not_allowed(request, team)
-
-    # Skeletal implementation for handling the chat completion request.
+    team["rate_limit"] = float(team["rate_limit"])
+    team["budget_limit"] = float(team["budget_limit"])
+    # model is allowed, check rate limiter
+    allowed = await check_rate_limit(
+        team_id=team["team_id"],
+        capacity=team["rate_limit"],
+        fill_rate=team["rate_limit"] / 60.0)
     
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Please try again later.")
+    
+
     # get provider from router
     provider = route_request(request, team)
     
