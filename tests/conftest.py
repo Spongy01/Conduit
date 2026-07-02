@@ -32,14 +32,24 @@ CREATE_MODELS_TABLE = """
     )
 """
 
+CREATE_RESERVATIONS_TABLE = """
+    CREATE TABLE IF NOT EXISTS reservations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        api_key TEXT REFERENCES teams(api_key),
+        reserved_amount NUMERIC(10, 8),
+        reserved_at TIMESTAMP NOT NULL DEFAULT now()
+    )
+"""
+
 
 @pytest_asyncio.fixture(autouse=True)
 async def db_conn():
     conn = await asyncpg.connect(TEST_DATABASE_URL)
     await conn.execute(CREATE_TEAMS_TABLE)
     await conn.execute(CREATE_MODELS_TABLE)
+    await conn.execute(CREATE_RESERVATIONS_TABLE)
     yield conn
-    await conn.execute("TRUNCATE teams, models")
+    await conn.execute("TRUNCATE reservations, teams, models")
     await conn.close()
 
 
@@ -52,3 +62,13 @@ async def client():
 @pytest.fixture
 def admin_headers():
     return {"X-Admin-Key": ADMIN_API_KEY}
+
+
+@pytest_asyncio.fixture
+async def budget_db():
+    from gateway.core.database import Database
+
+    database = Database(dsn=TEST_DATABASE_URL)
+    await database.connect()
+    yield database
+    await database.disconnect()

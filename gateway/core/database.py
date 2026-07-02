@@ -136,7 +136,62 @@ class Database:
             if not model:
                 return None
             return dict(model)
-        
+
+
+    ## Database Operations for Budget Enforcement
+    async def reserve_budget(self, api_key: str, amount: float) -> dict:
+        async with self.pool.acquire() as connection:
+            async with connection.transaction():
+                # Check if the team exists
+                team = await connection.fetchrow("SELECT * FROM teams WHERE api_key = $1", api_key)
+                if not team:
+                    raise ValueError(f"API key {api_key} does not exist")
+
+                # Atomically reserve the amount only if it stays within budget_limit,
+                # so concurrent reservations for the same team can't both pass a
+                # separate read-then-write check.
+                row = await connection.fetchrow(
+                    """
+                    UPDATE teams
+                    SET current_spend = current_spend + $1
+                    WHERE api_key = $2 AND current_spend + $1 <= budget_limit
+                    RETURNING api_key
+                    """,
+                    amount, api_key
+                )
+                if not row:
+                    raise ValueError("Budget limit exceeded")
+
+                reservation = await connection.fetchrow(
+                    """
+                    INSERT INTO reservations (api_key, reserved_amount)
+                    VALUES ($1, $2)
+                    RETURNING id
+                    """,
+                    api_key, amount
+                )
+
+                return {"approved": True, "reservation_id": reservation["id"]}
+
+    async def settle_budget(self, api_key: str, reservation_id: str, actual_spend: float) -> dict:
+        async with self.pool.acquire() as connection:
+            async with connection.transaction():
+                reservation = await connection.fetchrow(
+                    "SELECT * FROM reservations WHERE id = $1 AND api_key = $2", reservation_id, api_key
+                )
+                if not reservation:
+                    raise ValueError("Reservation not found")
+
+                await connection.execute("DELETE FROM reservations WHERE id = $1", reservation_id)
+
+                delta = actual_spend - float(reservation["reserved_amount"])
+                await connection.execute(
+                    "UPDATE teams SET current_spend = current_spend + $1 WHERE api_key = $2",
+                    delta, api_key
+                )
+
+                return {"settled": True, "actual_spend": actual_spend}
+
 
 
 # when using compose, set postgres rather than localhost, and use the password set in the docker-compose.yml file
