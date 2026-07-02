@@ -1,5 +1,6 @@
 from gateway.providers.BaseProvider import BaseProvider
-from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse
+from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse, Usage
+from gateway.core.tokens import estimate_tokens
 from typing import AsyncGenerator
 import httpx
 import json
@@ -42,6 +43,9 @@ class GeminiProvider(BaseProvider):
         if system_parts:
             payload["systemInstruction"] = {"parts": system_parts}
 
+        input_text = " ".join(p["text"] for p in system_parts) + " " + " ".join(m.content for m in request.messages)
+        input_token_estimate = estimate_tokens(input_text)
+
         headers = {"Content-Type": "application/json"}
 
         if stream:
@@ -66,6 +70,7 @@ class GeminiProvider(BaseProvider):
                 # STREAMING MODE
                 # =========================
                 if stream:
+                    first_chunk = True
                     async for line in response.aiter_lines():
 
                         if not line.startswith("data:"):
@@ -75,6 +80,23 @@ class GeminiProvider(BaseProvider):
 
                         chunk = json.loads(data)
                         candidates = chunk.get("candidates", [])
+
+                        # Final chunk: no text, carries the actual usage totals.
+                        if chunk.get("usageMetadata") and (
+                            not candidates or candidates[0].get("finishReason")
+                        ):
+                            usage = chunk["usageMetadata"]
+                            yield ChatCompletionResponse(
+                                model=model,
+                                is_final=True,
+                                usage=Usage(
+                                    prompt_tokens=usage["promptTokenCount"],
+                                    completion_tokens=usage["candidatesTokenCount"],
+                                    total_tokens=usage["totalTokenCount"],
+                                ),
+                            )
+                            continue
+
                         if not candidates:
                             continue
 
@@ -82,7 +104,17 @@ class GeminiProvider(BaseProvider):
                         for part in parts:
                             text = part.get("text", "")
                             if text:
-                                yield ChatCompletionResponse(model=model, delta=text)
+                                output_token_estimate = estimate_tokens(text)
+                                yield ChatCompletionResponse(
+                                    model=model,
+                                    delta=text,
+                                    usage=Usage(
+                                        prompt_tokens=input_token_estimate if first_chunk else 0,
+                                        completion_tokens=output_token_estimate,
+                                        total_tokens=(input_token_estimate if first_chunk else 0) + output_token_estimate,
+                                    ),
+                                )
+                                first_chunk = False
 
                 # =========================
                 # NON-STREAMING MODE
@@ -94,6 +126,16 @@ class GeminiProvider(BaseProvider):
                     content = (
                         full["candidates"][0]["content"]["parts"][0]["text"]
                     )
+                    usage = full["usageMetadata"]
 
                     logger.debug("Gemini API response received model=%s", model)
-                    yield ChatCompletionResponse(model=model, full_response=content)
+                    yield ChatCompletionResponse(
+                        model=model,
+                        full_response=content,
+                        is_final=True,
+                        usage=Usage(
+                            prompt_tokens=usage["promptTokenCount"],
+                            completion_tokens=usage["candidatesTokenCount"],
+                            total_tokens=usage["totalTokenCount"],
+                        ),
+                    )

@@ -9,20 +9,40 @@ from fastapi import HTTPException
 from gateway.auth.authenticate import authenticate
 from gateway.policy.model_access import raise_if_model_not_allowed
 from gateway.policy.rate_limiter import check_rate_limit
+from gateway.policy.budget import reserve_budget, settle_budget
 from gateway.router.router import route_request
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def return_streaming_response(request: ChatCompletionRequest, provider: BaseProvider):
+async def _settle_quietly(api_key: str, model: str, team: dict, reservation_id: str,
+                           input_tokens: int, output_tokens: int):
+    """Best-effort settle: a settlement failure shouldn't take down a response
+    that's already been produced (or, for streaming, already sent to the client)."""
+    try:
+        await settle_budget(api_key, model, team, reservation_id, input_tokens, output_tokens)
+    except ValueError as e:
+        logger.warning("Failed to settle budget reservation_id=%s: %s", reservation_id, e)
+
+
+async def return_streaming_response(request: ChatCompletionRequest, provider: BaseProvider,
+                                     team: dict, reservation_id: str):
     """
     Handle streaming response for chat completion requests.
     This function processes the request and yields responses as they are generated.
     """
-    
+    final_usage = None
     async for response in provider.generate(request):
+        if response.is_final and response.usage is not None:
+            final_usage = response.usage
         yield "data: " + response.model_dump_json() + "\n\n"
+
+    if final_usage is not None:
+        await _settle_quietly(team["api_key"], request.model, team, reservation_id,
+                               final_usage.prompt_tokens, final_usage.completion_tokens)
+    else:
+        await _settle_quietly(team["api_key"], request.model, team, reservation_id, 0, 0)
 
 
 @router.post("/v1/chat/completion")
@@ -37,6 +57,10 @@ async def chat_completion(request: ChatCompletionRequest,
 
     # Check if the requested model is allowed for the team
     raise_if_model_not_allowed(request, team)
+
+    ##############
+    # Rate limiting logic
+    ##############
     team["rate_limit"] = float(team["rate_limit"])
     team["budget_limit"] = float(team["budget_limit"])
     # model is allowed, check rate limiter
@@ -52,6 +76,17 @@ async def chat_completion(request: ChatCompletionRequest,
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Please try again later.",
                             headers={"Retry-After": str(retry_after)})
 
+    ##############
+    # Budget Enforcement logic (pre flight, reserve budget)
+    ##############
+
+    try:
+        reservation = await reserve_budget(team["api_key"], team, request)
+    except ValueError as e:
+        logger.warning("Budget reservation denied team_id=%s model=%s: %s", team_id, request.model, e)
+        raise HTTPException(status_code=402, detail=str(e))
+
+    reservation_id = reservation["reservation_id"]
 
     # get provider from router
     provider = route_request(request, team)
@@ -63,21 +98,33 @@ async def chat_completion(request: ChatCompletionRequest,
 
     # Streaming mode: Return a streaming response if requested.
     if stream:
-        return StreamingResponse(return_streaming_response(request, provider))
+        return StreamingResponse(return_streaming_response(request, provider, team, reservation_id))
 
     # Non-streaming mode: Call the provider for chat_completion and return the response.
     response_list = []
-    async for response in provider.generate(request):
-        response_list.append(response.model_dump())
+    try:
+        async for response in provider.generate(request):
+            response_list.append(response)
+    except HTTPException:
+        await _settle_quietly(team["api_key"], request.model, team, reservation_id, 0, 0)
+        raise
 
     logger.debug("Provider response received team_id=%s model=%s response_count=%d", team_id, request.model, len(response_list))
 
     if len(response_list) == 0:
         logger.error("No response generated team_id=%s model=%s", team_id, request.model)
+        await _settle_quietly(team["api_key"], request.model, team, reservation_id, 0, 0)
         raise HTTPException(status_code=500, detail="No response generated.")
     if len(response_list) == 1:
-        return response_list[0]
+        response = response_list[0]
+        if response.usage is not None:
+            await _settle_quietly(team["api_key"], request.model, team, reservation_id,
+                                   response.usage.prompt_tokens, response.usage.completion_tokens)
+        else:
+            await _settle_quietly(team["api_key"], request.model, team, reservation_id, 0, 0)
+        return response.model_dump()
 
     # should not have more than 1 response in non-streaming mode, but if it does, return error
     logger.error("Multiple responses generated in non-streaming mode team_id=%s model=%s", team_id, request.model)
+    await _settle_quietly(team["api_key"], request.model, team, reservation_id, 0, 0)
     raise HTTPException(status_code=500, detail="Multiple responses generated in non-streaming mode.")

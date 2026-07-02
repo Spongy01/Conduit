@@ -1,5 +1,6 @@
 from gateway.providers.BaseProvider import BaseProvider
-from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse
+from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse, Usage
+from gateway.core.tokens import estimate_tokens
 from typing import AsyncGenerator
 import httpx
 import json
@@ -40,6 +41,9 @@ class AnthropicProvider(BaseProvider):
         if system_parts:
             payload["system"] = "\n".join(system_parts)
 
+        input_text = " ".join(system_parts) + " " + " ".join(m.content for m in request.messages)
+        input_token_estimate = estimate_tokens(input_text)
+
         headers = {
             "x-api-key": self.api_key,
             "anthropic-version": "2023-06-01",
@@ -68,6 +72,7 @@ class AnthropicProvider(BaseProvider):
                 # STREAMING MODE
                 # =========================
                 if stream:
+                    first_chunk = True
                     async for line in response.aiter_lines():
                         if not line.startswith("data:"):
                             continue
@@ -81,7 +86,31 @@ class AnthropicProvider(BaseProvider):
                             if delta.get("type") == "text_delta":
                                 text = delta.get("text", "")
                                 if text:
-                                    yield ChatCompletionResponse(model=model, delta=text)
+                                    output_token_estimate = estimate_tokens(text)
+                                    yield ChatCompletionResponse(
+                                        model=model,
+                                        delta=text,
+                                        usage=Usage(
+                                            prompt_tokens=input_token_estimate if first_chunk else 0,
+                                            completion_tokens=output_token_estimate,
+                                            total_tokens=(input_token_estimate if first_chunk else 0) + output_token_estimate,
+                                        ),
+                                    )
+                                    first_chunk = False
+
+                        # message_delta carries the final, actual output token count
+                        elif chunk.get("type") == "message_delta":
+                            usage = chunk.get("usage", {})
+                            if "output_tokens" in usage:
+                                yield ChatCompletionResponse(
+                                    model=model,
+                                    is_final=True,
+                                    usage=Usage(
+                                        prompt_tokens=input_token_estimate,
+                                        completion_tokens=usage["output_tokens"],
+                                        total_tokens=input_token_estimate + usage["output_tokens"],
+                                    ),
+                                )
 
                 # =========================
                 # NON-STREAMING MODE
@@ -91,6 +120,16 @@ class AnthropicProvider(BaseProvider):
                     full = json.loads(data)
 
                     content = full["content"][0]["text"]
+                    usage = full["usage"]
 
                     logger.debug("Anthropic API response received model=%s", model)
-                    yield ChatCompletionResponse(model=model, full_response=content)
+                    yield ChatCompletionResponse(
+                        model=model,
+                        full_response=content,
+                        is_final=True,
+                        usage=Usage(
+                            prompt_tokens=usage["input_tokens"],
+                            completion_tokens=usage["output_tokens"],
+                            total_tokens=usage["input_tokens"] + usage["output_tokens"],
+                        ),
+                    )

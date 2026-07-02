@@ -1,5 +1,6 @@
 from gateway.providers.BaseProvider import BaseProvider
-from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse
+from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse, Usage
+from gateway.core.tokens import estimate_tokens
 from typing import AsyncGenerator
 from fastapi import HTTPException
 import httpx
@@ -36,6 +37,11 @@ class OpenAIProvider(BaseProvider):
             "max_tokens": max_tokens,
             "stream": stream
         }
+        if stream:
+            payload["stream_options"] = {"include_usage": True}
+
+        input_text = " ".join(m.content for m in messages)
+        input_token_estimate = estimate_tokens(input_text)
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -64,6 +70,7 @@ class OpenAIProvider(BaseProvider):
                 # STREAMING MODE
                 # =========================
                 if stream:
+                    first_chunk = True
                     async for line in response.aiter_lines():
 
                         if not line.startswith("data:"):
@@ -75,13 +82,37 @@ class OpenAIProvider(BaseProvider):
                             break
 
                         chunk = json.loads(data)
+
+                        # Final usage-only chunk (empty choices), sent because we
+                        # requested stream_options.include_usage.
+                        if not chunk.get("choices") and "usage" in chunk:
+                            usage = chunk["usage"]
+                            yield ChatCompletionResponse(
+                                model=model,
+                                is_final=True,
+                                usage=Usage(
+                                    prompt_tokens=usage["prompt_tokens"],
+                                    completion_tokens=usage["completion_tokens"],
+                                    total_tokens=usage["total_tokens"],
+                                ),
+                            )
+                            continue
+
                         delta = chunk["choices"][0].get("delta", {})
 
                         if "content" in delta:
+                            content = delta["content"]
+                            output_token_estimate = estimate_tokens(content)
                             yield ChatCompletionResponse(
                                 model=model,
-                                delta=delta["content"]
+                                delta=content,
+                                usage=Usage(
+                                    prompt_tokens=input_token_estimate if first_chunk else 0,
+                                    completion_tokens=output_token_estimate,
+                                    total_tokens=(input_token_estimate if first_chunk else 0) + output_token_estimate,
+                                ),
                             )
+                            first_chunk = False
 
                 # =========================
                 # NON-STREAMING MODE
@@ -94,9 +125,16 @@ class OpenAIProvider(BaseProvider):
                         full["choices"][0]
                         ["message"]["content"]
                     )
+                    usage = full["usage"]
 
                     logger.debug("OpenAI API response received model=%s", model)
                     yield ChatCompletionResponse(
                         model=model,
-                        full_response=content
+                        full_response=content,
+                        is_final=True,
+                        usage=Usage(
+                            prompt_tokens=usage["prompt_tokens"],
+                            completion_tokens=usage["completion_tokens"],
+                            total_tokens=usage["total_tokens"],
+                        ),
                     )

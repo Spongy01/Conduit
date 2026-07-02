@@ -1,5 +1,6 @@
 from gateway.providers.BaseProvider import BaseProvider
-from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse
+from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse, Usage
+from gateway.core.tokens import estimate_tokens
 from typing import AsyncGenerator
 import httpx
 import json
@@ -28,6 +29,9 @@ class OllamaProvider(BaseProvider):
             },
         }
 
+        input_text = " ".join(m.content for m in request.messages)
+        input_token_estimate = estimate_tokens(input_text)
+
         headers = {"Content-Type": "application/json"}
         url = f"{self.base_url}/api/chat"
 
@@ -48,6 +52,7 @@ class OllamaProvider(BaseProvider):
                 # STREAMING MODE
                 # =========================
                 if stream:
+                    first_chunk = True
                     async for line in response.aiter_lines():
                         if not line:
                             continue
@@ -56,9 +61,30 @@ class OllamaProvider(BaseProvider):
                         content = chunk.get("message", {}).get("content", "")
 
                         if content:
-                            yield ChatCompletionResponse(model=model, delta=content)
+                            output_token_estimate = estimate_tokens(content)
+                            yield ChatCompletionResponse(
+                                model=model,
+                                delta=content,
+                                usage=Usage(
+                                    prompt_tokens=input_token_estimate if first_chunk else 0,
+                                    completion_tokens=output_token_estimate,
+                                    total_tokens=(input_token_estimate if first_chunk else 0) + output_token_estimate,
+                                ),
+                            )
+                            first_chunk = False
 
                         if chunk.get("done"):
+                            prompt_eval_count = chunk.get("prompt_eval_count", input_token_estimate)
+                            eval_count = chunk.get("eval_count", 0)
+                            yield ChatCompletionResponse(
+                                model=model,
+                                is_final=True,
+                                usage=Usage(
+                                    prompt_tokens=prompt_eval_count,
+                                    completion_tokens=eval_count,
+                                    total_tokens=prompt_eval_count + eval_count,
+                                ),
+                            )
                             break
 
                 # =========================
@@ -69,6 +95,17 @@ class OllamaProvider(BaseProvider):
                     full = json.loads(data)
 
                     content = full["message"]["content"]
+                    prompt_eval_count = full.get("prompt_eval_count", input_token_estimate)
+                    eval_count = full.get("eval_count", 0)
 
                     logger.debug("Ollama API response received model=%s", model)
-                    yield ChatCompletionResponse(model=model, full_response=content)
+                    yield ChatCompletionResponse(
+                        model=model,
+                        full_response=content,
+                        is_final=True,
+                        usage=Usage(
+                            prompt_tokens=prompt_eval_count,
+                            completion_tokens=eval_count,
+                            total_tokens=prompt_eval_count + eval_count,
+                        ),
+                    )

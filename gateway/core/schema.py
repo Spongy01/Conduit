@@ -33,5 +33,6 @@ class ChatCompletionResponse(BaseModel):
     delta: Optional[str] = None
     finish_reason: Optional[str] = None
     usage: Optional[Usage] = None
+    is_final: bool = False
 
 
