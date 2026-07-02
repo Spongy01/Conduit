@@ -1,4 +1,5 @@
 import logging
+import math
 from fastapi import APIRouter, Depends
 from gateway.core.schema import ChatCompletionRequest
 from gateway.providers.BaseProvider import BaseProvider
@@ -47,7 +48,9 @@ async def chat_completion(request: ChatCompletionRequest,
     logger.debug("Rate limit result team_id=%s allowed=%s", team_id, allowed)
 
     if not allowed:
-        raise HTTPException(status_code=429, detail="Rate limit exceeded. Please try again later.")
+        retry_after = math.ceil(60.0 / team["rate_limit"])
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Please try again later.",
+                            headers={"Retry-After": str(retry_after)})
 
 
     # get provider from router
