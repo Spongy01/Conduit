@@ -10,10 +10,16 @@ from fastapi import HTTPException
 logger = logging.getLogger(__name__)
 
 class OllamaProvider(BaseProvider):
+    """BaseProvider implementation for a local/self-hosted Ollama server."""
+
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
 
     async def generate(self, request: ChatCompletionRequest) -> AsyncGenerator[ChatCompletionResponse, None]:
+        """Translates a ChatCompletionRequest into an Ollama /api/chat call
+        and yields ChatCompletionResponse chunks (streaming) or a single
+        final response (non-streaming). Ollama has no real cost (self-hosted),
+        so usage here is only for budget/logging bookkeeping."""
         model = request.model
         stream = request.stream or False
         temperature = request.temperature if request.temperature is not None else 0.7

@@ -11,6 +11,8 @@ import os
 logger = logging.getLogger(__name__)
 
 class OpenAIProvider(BaseProvider):
+    """BaseProvider implementation for the OpenAI Chat Completions API."""
+
     def __init__(self, api_key: str):
         self.api_key = api_key
         self._base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com")

@@ -1,3 +1,5 @@
+"""Resolves which provider client should handle a given chat request,
+based on the provider tag attached to the model in the team's allowlist."""
 import logging
 from gateway.core.providers import PROVIDERS
 from gateway.core.schema import ChatCompletionRequest

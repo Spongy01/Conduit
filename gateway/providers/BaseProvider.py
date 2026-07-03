@@ -1,9 +1,13 @@
+"""Common interface every upstream LLM provider (OpenAI, Anthropic, Gemini,
+Ollama) implements, so router.py and api/chat.py can treat them interchangeably."""
 from abc import ABC, abstractmethod
 from typing import AsyncGenerator
 from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse
 
 class BaseProvider(ABC):
-    
+    """Abstract base class for all LLM providers."""
+
+
     @abstractmethod
     async def generate(self, request: ChatCompletionRequest) -> AsyncGenerator[ChatCompletionResponse, None]:
         """

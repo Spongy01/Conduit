@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 
 def _model_costs(team: dict, model: str) -> dict:
+    """Looks up the pricing dict for `model` within a team's enriched
+    allowed_models list. Raises ValueError if the team isn't allowed to use it."""
     for allowed_model in team.get("allowed_models", []):
         if allowed_model["name"] == model:
             return allowed_model

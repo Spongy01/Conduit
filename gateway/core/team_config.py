@@ -1,3 +1,6 @@
+"""Team configuration: reads go through the Redis cache (core/cache.py)
+with Postgres (core/database.py) as the fallback/source of truth; writes go
+straight to Postgres and invalidate the cache."""
 from gateway.core.database import db
 from gateway.core import cache
 # Dummy stand-ins for what will eventually be two Postgres tables.
@@ -74,7 +77,9 @@ async def create_team(
 # update key data function
 
 async def update_team(api_key: str, **fields) -> dict:
-    
+    """Updates the given fields for a team in Postgres, invalidates its
+    stale cache entry, and returns the freshly re-enriched config."""
+
     try:
         await db.update_team(api_key, **fields)
     except ValueError as e:
@@ -90,6 +95,8 @@ async def update_team(api_key: str, **fields) -> dict:
 # revoke key function
 
 async def revoke_team(api_key: str) -> None:
+    """Deletes a team from Postgres and evicts its cache entry so the
+    revoked key stops authenticating immediately."""
     try:
         await db.revoke_team(api_key)
     except ValueError as e:

@@ -1,3 +1,6 @@
+"""Admin API: create/update/revoke teams and manage the model catalog.
+Every endpoint here is gated by require_admin (a single shared admin key),
+unlike the chat API which authenticates per-team."""
 from gateway.auth.admin import require_admin
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
@@ -9,6 +12,7 @@ from gateway.core.team_config import create_team, update_team, revoke_team
 router = APIRouter()
 
 class CreateTeamRequest(BaseModel):
+    """Body for POST /v1/teams: registers a new team and its API key."""
     api_key: str
     team_id: str
     team_name: str
@@ -18,7 +22,8 @@ class CreateTeamRequest(BaseModel):
     budget_period: str = "monthly"
 
 class UpdateTeamRequest(BaseModel):
-    # All optional: send only the fields you want to change.
+    """Body for PATCH /v1/teams/{api_key}. All optional: send only the
+    fields you want to change."""
     team_name: str | None = None
     allowed_models: list[str] | None = None
     rate_limit: int | None = None
@@ -26,6 +31,8 @@ class UpdateTeamRequest(BaseModel):
     budget_period: str | None = None
 
 class CreateModelRequest(BaseModel):
+    """Body for POST/PATCH /v1/models: registers or updates a model's
+    provider and per-token pricing used for budget estimation."""
     model_name: str
     provider: str
     cost_per_input_token: float = 0.0
@@ -37,6 +44,7 @@ class CreateModelRequest(BaseModel):
 
 @router.post("/v1/teams", dependencies=[Depends(require_admin)])
 async def create_team_endpoint(request: CreateTeamRequest):
+    """Registers a new team. Returns 400 if the api_key is already taken."""
     try:
         return await create_team(**request.model_dump())
     except ValueError as e:
@@ -45,6 +53,8 @@ async def create_team_endpoint(request: CreateTeamRequest):
 
 @router.patch("/v1/teams/{api_key}", dependencies=[Depends(require_admin)])
 async def update_team_endpoint(api_key: str, request: UpdateTeamRequest):
+    """Updates only the fields present in the request body (exclude_unset),
+    so omitted fields keep their existing values. 404 if the team is unknown."""
     try:
         return await update_team(api_key, **request.model_dump(exclude_unset=True))
     except ValueError as e:
@@ -53,6 +63,7 @@ async def update_team_endpoint(api_key: str, request: UpdateTeamRequest):
 
 @router.delete("/v1/teams/{api_key}", dependencies=[Depends(require_admin)])
 async def revoke_team_endpoint(api_key: str):
+    """Deletes a team's config, invalidating its API key immediately."""
     try:
         await revoke_team(api_key)
         return {"status": "revoked", "api_key": api_key}
@@ -66,6 +77,7 @@ async def revoke_team_endpoint(api_key: str):
 
 @router.post("/v1/models", dependencies=[Depends(require_admin)])
 async def create_model_endpoint(request: CreateModelRequest):
+    """Adds a new model to the catalog. Returns 400 if it already exists."""
     try:
         return await add_model(**request.model_dump())
     except ValueError as e:
@@ -73,6 +85,8 @@ async def create_model_endpoint(request: CreateModelRequest):
 
 @router.patch("/v1/models/{model_name}", dependencies=[Depends(require_admin)])
 async def update_model_endpoint(model_name: str, request: CreateModelRequest):
+    """Updates a model's provider/pricing fields. model_name is the path
+    param, not a mutable field, so it's dropped from the update payload."""
     try:
         fields = request.model_dump(exclude_unset=True)
         fields.pop("model_name", None)
@@ -82,6 +96,7 @@ async def update_model_endpoint(model_name: str, request: CreateModelRequest):
 
 @router.delete("/v1/models/{model_name}", dependencies=[Depends(require_admin)])
 async def delete_model_endpoint(model_name: str):
+    """Removes a model from the catalog. 404 if it doesn't exist."""
     try:
         await delete_model(model_name)
         return {"status": "deleted", "model_name": model_name}

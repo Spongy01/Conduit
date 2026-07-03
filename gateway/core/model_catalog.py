@@ -1,3 +1,5 @@
+"""Model catalog: thin pass-through to the database layer for managing
+which models the gateway knows about and their per-token pricing."""
 from gateway.core.database import db
 
 async def add_model(model_name: str, provider: str, cost_per_input_token: float, cost_per_output_token: float) -> None:
@@ -14,6 +16,8 @@ async def add_model(model_name: str, provider: str, cost_per_input_token: float,
 
 
 async def update_model(model_name: str, **fields) -> dict:
+    """Updates the given fields (e.g. pricing) for an existing model and
+    returns its refreshed config. Raises ValueError if unknown."""
     try:
         await db.update_model(model_name, **fields)
     except ValueError as e:
@@ -23,6 +27,7 @@ async def update_model(model_name: str, **fields) -> dict:
 
 
 async def delete_model(model_name: str) -> None:
+    """Removes a model from the catalog. Raises ValueError if unknown."""
     try:
         await db.delete_model(model_name)
     except ValueError as e:

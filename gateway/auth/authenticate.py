@@ -1,3 +1,5 @@
+"""Per-team authentication for the chat API, backed by team API keys
+(as opposed to auth/admin.py's single shared admin secret)."""
 import logging
 from fastapi import Header, HTTPException
 from gateway.core.team_config import get_team_config

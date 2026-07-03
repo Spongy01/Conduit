@@ -11,11 +11,16 @@ from fastapi import HTTPException
 logger = logging.getLogger(__name__)
 
 class AnthropicProvider(BaseProvider):
+    """BaseProvider implementation for the Anthropic Messages API."""
+
     def __init__(self, api_key: str):
         self.api_key = api_key
         self._base_url = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
 
     async def generate(self, request: ChatCompletionRequest) -> AsyncGenerator[ChatCompletionResponse, None]:
+        """Translates a ChatCompletionRequest into an Anthropic /v1/messages
+        call and yields ChatCompletionResponse chunks (streaming) or a single
+        final response (non-streaming), each carrying token usage."""
         model = request.model
         stream = request.stream or False
         temperature = request.temperature if request.temperature is not None else 0.7

@@ -1,25 +1,35 @@
+"""Postgres access layer: owns the connection pool and every SQL
+statement for teams, models, and budget reservations. This is the source
+of truth that core/team_config.py and core/model_catalog.py cache in front
+of."""
 import asyncpg
 import os
 
 class Database:
+    """Thin async wrapper around an asyncpg connection pool."""
+
     def __init__(self, dsn: str):
-        self.dsn = dsn  # data source name: postgresql://user:password@host:port/database || 
+        self.dsn = dsn  # data source name: postgresql://user:password@host:port/database ||
                         # has everything in a line insteaad of passing each parameter separately
         self.pool = None
 
     async def connect(self):
+        """Creates the connection pool. Must be called before any query
+        method is used (see main.py's lifespan handler)."""
         self.pool = await asyncpg.create_pool(
-                dsn=self.dsn, 
+                dsn=self.dsn,
                 min_size=5,
                 max_size=25)
 
     async def disconnect(self):
+        """Closes the connection pool on application shutdown."""
         if self.pool:
             await self.pool.close()
 
 
     ## Database Operations for Teams
     async def create_team(self, api_key: str, team_id: str, team_name: str, allowed_models: list[str], rate_limit: int, budget_limit: float, budget_period: str = "monthly"):
+        """Inserts a new team row. Raises ValueError if api_key already exists."""
         async with self.pool.acquire() as connection:
             async with connection.transaction():
                 # Insert the new team into the database
@@ -36,6 +46,9 @@ class Database:
                 
             
     async def update_team(self, api_key: str, **fields):
+        """Updates only the given columns for a team. Raises ValueError if
+        the api_key doesn't exist. `fields` keys are trusted to be valid
+        column names (validated upstream by the Pydantic request models)."""
         async with self.pool.acquire() as connection:
             async with connection.transaction():
                 # Check if the team exists
@@ -61,6 +74,7 @@ class Database:
     
 
     async def revoke_team(self, api_key: str):
+        """Permanently deletes a team row. Raises ValueError if it doesn't exist."""
         async with self.pool.acquire() as connection:
             async with connection.transaction():
                 # Check if the team exists
@@ -73,16 +87,18 @@ class Database:
                 await connection.execute("DELETE FROM teams WHERE api_key = $1", api_key)
     
     async def get_team(self, api_key: str):
+        """Returns the team row as a dict, or None if the api_key is unknown."""
         async with self.pool.acquire() as connection:
             team = await connection.fetchrow("SELECT * FROM teams WHERE api_key = $1", api_key)
             if not team:
                 return None
             return dict(team)
-        
+
 
     ## Database Operations for Models
     async def add_model(self, model_name: str, provider: str, cost_per_input_token: float, cost_per_output_token: float):
-        async with self.pool.acquire() as connection: 
+        """Inserts a new model row. Raises ValueError if model_name already exists."""
+        async with self.pool.acquire() as connection:
             # Insert the new model into the database
             try:
                 await connection.execute(
@@ -96,6 +112,8 @@ class Database:
                 raise ValueError(f"Model {model_name} already exists")
     
     async def update_model(self, model_name: str, **fields):
+        """Updates only the given columns for a model. Raises ValueError if
+        model_name doesn't exist."""
         async with self.pool.acquire() as connection:
             async with connection.transaction():
                 # Check if the model exists
@@ -119,6 +137,7 @@ class Database:
                 )
     
     async def delete_model(self, model_name: str):
+        """Permanently deletes a model row. Raises ValueError if it doesn't exist."""
         async with self.pool.acquire() as connection:
             async with connection.transaction():
                 # Check if the model exists
@@ -131,6 +150,7 @@ class Database:
 
     
     async def get_model(self, model_name: str):
+        """Returns the model row as a dict, or None if model_name is unknown."""
         async with self.pool.acquire() as connection:
             model = await connection.fetchrow("SELECT * FROM models WHERE name = $1", model_name)
             if not model:
@@ -140,6 +160,9 @@ class Database:
 
     ## Database Operations for Budget Enforcement
     async def reserve_budget(self, api_key: str, amount: float) -> dict:
+        """Atomically reserves `amount` against a team's remaining budget
+        and records it as a pending reservation, to be finalized later by
+        settle_budget once the actual cost is known."""
         async with self.pool.acquire() as connection:
             async with connection.transaction():
                 # Check if the team exists
@@ -174,6 +197,9 @@ class Database:
                 return {"approved": True, "reservation_id": reservation["id"]}
 
     async def settle_budget(self, api_key: str, reservation_id: str, actual_spend: float) -> dict:
+        """Replaces a pending reservation with the actual spend: removes the
+        reservation row and adjusts current_spend by the delta between what
+        was reserved and what was actually used (can be positive or negative)."""
         async with self.pool.acquire() as connection:
             async with connection.transaction():
                 reservation = await connection.fetchrow(

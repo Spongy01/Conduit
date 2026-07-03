@@ -11,12 +11,17 @@ from fastapi import HTTPException
 logger = logging.getLogger(__name__)
 
 class GeminiProvider(BaseProvider):
+    """BaseProvider implementation for the Google Gemini generateContent API."""
+
     def __init__(self, api_key: str):
         self.api_key = api_key
         _base = os.environ.get("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
         self.base_url = f"{_base}/v1beta/models"
 
     async def generate(self, request: ChatCompletionRequest) -> AsyncGenerator[ChatCompletionResponse, None]:
+        """Translates a ChatCompletionRequest into a Gemini generateContent/
+        streamGenerateContent call and yields ChatCompletionResponse chunks
+        (streaming) or a single final response (non-streaming)."""
         model = request.model
         stream = request.stream or False
         temperature = request.temperature if request.temperature is not None else 0.7

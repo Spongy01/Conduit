@@ -1,3 +1,5 @@
+"""FastAPI application entrypoint: wires up routers and manages the
+lifecycle of shared connections (Postgres pool, Redis client)."""
 import logging
 from fastapi import FastAPI
 from gateway.api.chat import router as chat_router
@@ -15,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Opens the database pool and Redis connection on startup, and closes
+    both on shutdown, so every request handler can assume they're ready."""
     # Startup code: Initialize the database connection pool
     await db.connect()
     logger.debug("Database connection pool initialized")
@@ -31,5 +35,5 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
-app.include_router(chat_router, prefix="/api")
-app.include_router(admin_router, prefix="/admin")
+app.include_router(chat_router, prefix="/api")    # public chat completion endpoints
+app.include_router(admin_router, prefix="/admin")  # admin-key-protected team/model management

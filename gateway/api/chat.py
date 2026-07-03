@@ -1,3 +1,6 @@
+"""Chat completion API: authenticates the caller, enforces model access,
+rate limits, and budget, then routes the request to a provider and streams
+or returns its response."""
 import logging
 import math
 from fastapi import APIRouter, Depends
@@ -64,6 +67,8 @@ async def chat_completion(request: ChatCompletionRequest,
     team["rate_limit"] = float(team["rate_limit"])
     team["budget_limit"] = float(team["budget_limit"])
     # model is allowed, check rate limiter
+    # Token bucket: capacity is requests/minute, fill_rate converts that to
+    # tokens refilled per second so the bucket refills continuously.
     allowed = await check_rate_limit(
         team_id=team["team_id"],
         capacity=team["rate_limit"],
@@ -72,6 +77,7 @@ async def chat_completion(request: ChatCompletionRequest,
     logger.debug("Rate limit result team_id=%s allowed=%s", team_id, allowed)
 
     if not allowed:
+        # Worst case wait for one token to refill, rounded up for the client.
         retry_after = math.ceil(60.0 / team["rate_limit"])
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Please try again later.",
                             headers={"Retry-After": str(retry_after)})
