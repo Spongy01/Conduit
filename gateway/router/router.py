@@ -1,11 +1,55 @@
 """Resolves which provider client should handle a given chat request,
 based on the provider tag attached to the model in the team's allowlist."""
 import logging
+import random
 from gateway.core.providers import PROVIDERS
 from gateway.core.schema import ChatCompletionRequest
 from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
+
+
+def build_fallback_candidates(
+    requested_model: str,
+    allowed_models: list[dict],
+    failed_provider: str,
+    allow_tier_downgrade: bool,
+) -> list[dict]:
+    """
+    Builds the ordered fallback plan for a request whose first attempt (on
+    `failed_provider`) failed. Walks down from the requested model's tier:
+    within a tier, repeatedly picks a random remaining model on a provider
+    not yet used anywhere in this plan (random.choice over the shrinking
+    pool); when a tier's pool is empty, moves to the next tier down only if
+    `allow_tier_downgrade` is True. Only models present in `allowed_models`
+    are eligible. Returns [] if `requested_model` isn't in `allowed_models`
+    or no distinct-provider peers exist.
+    """
+    requested = next((m for m in allowed_models if m["name"] == requested_model), None)
+    if requested is None:
+        return []
+
+    excluded_providers = {failed_provider}
+    candidates = []
+    tier = requested["tier"]
+
+    while True:
+        pool = [
+            m for m in allowed_models
+            if m["tier"] == tier and m["name"] != requested_model and m["provider"] not in excluded_providers
+        ]
+        while pool:
+            choice = random.choice(pool)
+            candidates.append(choice)
+            excluded_providers.add(choice["provider"])
+            pool = [m for m in pool if m["provider"] not in excluded_providers]
+
+        if not allow_tier_downgrade or tier <= 1:
+            break
+        tier -= 1
+
+    return candidates
+
 
 def route_request(request: ChatCompletionRequest, team: dict):
     """
