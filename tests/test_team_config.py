@@ -3,6 +3,11 @@ import pytest
 from gateway.core import team_config
 
 
+@pytest.fixture(autouse=True)
+def _use_test_db(monkeypatch, team_config_db):
+    monkeypatch.setattr(team_config, "db", team_config_db)
+
+
 async def test_get_team_config_enriches_tier(db_conn):
     await db_conn.execute(
         "INSERT INTO models (name, provider, cost_per_input_token, cost_per_output_token, tier) VALUES ($1, $2, $3, $4, $5)",
