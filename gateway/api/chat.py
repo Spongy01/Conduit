@@ -44,7 +44,8 @@ async def return_streaming_response(generator: AsyncGenerator[ChatCompletionResp
         yield "data: " + response.model_dump_json() + "\n\n"
 
     if actual_model != requested_model:
-        logger.info("Fallback served requested_model=%s actual_model=%s", requested_model, actual_model)
+        logger.info("Fallback served team_id=%s requested_model=%s actual_model=%s",
+                    team.get("team_id"), requested_model, actual_model)
 
     if final_usage is not None:
         await _settle_quietly(team["api_key"], actual_model, team, reservation_id,

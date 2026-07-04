@@ -166,7 +166,7 @@ async def route_request(request: ChatCompletionRequest, team: dict) -> tuple[Asy
             logger.warning("Provider attempt failed model=%s provider=%s status=%s",
                            candidate["name"], candidate["provider"], e.status_code)
 
-            if e.status_code in NON_RETRYABLE_STATUS_CODES:
+            if not is_retryable_status(e.status_code):
                 raise
             if not request.allow_fallback:
                 raise
@@ -188,6 +188,11 @@ async def route_request(request: ChatCompletionRequest, team: dict) -> tuple[Asy
                     request.model, allowed_models, candidate["provider"], request.allow_tier_downgrade
                 ))
                 fallback_computed = True
+        except Exception:
+            await release_budget(team["api_key"], reservation_id)
+            logger.error("Unexpected error during provider attempt model=%s provider=%s",
+                        candidate["name"], candidate["provider"], exc_info=True)
+            raise
 
     if provider_failures == 0 and budget_failures > 0:
         raise ValueError("Budget limit exceeded")

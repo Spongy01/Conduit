@@ -14,6 +14,8 @@ from gateway.router.router import route_request, NoProviderAvailableError
 from tests.test_provider_usage import _run_app, _stop_app
 from tests.dummy_providers.openai_dummy import app as openai_app
 from tests.dummy_providers.anthropic_dummy import app as anthropic_app
+from tests.dummy_providers.gemini_dummy import app as gemini_app
+from tests.dummy_providers.ollama_dummy import app as ollama_app
 
 
 def _failing_app(status_code: int = 500) -> FastAPI:
@@ -55,6 +57,37 @@ async def openai_failing(request):
     PROVIDERS["openai"]._base_url = url
     yield url
     PROVIDERS["openai"]._base_url = original
+    await _stop_app(server, task)
+
+
+@pytest_asyncio.fixture
+async def anthropic_failing(request):
+    status_code = getattr(request, "param", 500)
+    server, task, url = await _run_app(_failing_app(status_code))
+    original = PROVIDERS["anthropic"]._base_url
+    PROVIDERS["anthropic"]._base_url = url
+    yield url
+    PROVIDERS["anthropic"]._base_url = original
+    await _stop_app(server, task)
+
+
+@pytest_asyncio.fixture
+async def gemini_ok():
+    server, task, url = await _run_app(gemini_app)
+    original = PROVIDERS["gemini"].base_url
+    PROVIDERS["gemini"].base_url = f"{url}/v1beta/models"
+    yield url
+    PROVIDERS["gemini"].base_url = original
+    await _stop_app(server, task)
+
+
+@pytest_asyncio.fixture
+async def ollama_ok():
+    server, task, url = await _run_app(ollama_app)
+    original = PROVIDERS["ollama"].base_url
+    PROVIDERS["ollama"].base_url = url
+    yield url
+    PROVIDERS["ollama"].base_url = original
     await _stop_app(server, task)
 
 
@@ -236,4 +269,81 @@ async def test_chat_endpoint_falls_back_and_settles_against_actual_model(
     team_row = await db_conn.fetchrow("SELECT current_spend FROM teams WHERE api_key = $1", "sk-fb-http-1")
     assert float(team_row["current_spend"]) == pytest.approx(
         body["usage"]["prompt_tokens"] * 0.02 + body["usage"]["completion_tokens"] * 0.02
+    )
+
+
+async def test_three_candidate_chain_second_fallback_succeeds(db_conn, openai_failing, anthropic_failing, gemini_ok):
+    await _seed_model(db_conn, "gpt-4o-e2e", "openai", tier=4)
+    await _seed_model(db_conn, "claude-e2e", "anthropic", tier=4)
+    await _seed_model(db_conn, "gemini-e2e", "gemini", tier=4)
+    await _seed_team(db_conn, "sk-fb-8", ["gpt-4o-e2e", "claude-e2e", "gemini-e2e"])
+    team = await _team_dict("sk-fb-8")
+
+    generator, reservation_id = await route_request(_request("gpt-4o-e2e", allow_fallback=True), team)
+
+    responses = [r async for r in generator]
+    assert responses[0].model == "gemini-e2e"
+
+    # both failed attempts (openai, anthropic) released their reservations;
+    # only the winning gemini attempt's reservation remains outstanding
+    count = await db_conn.fetchval("SELECT COUNT(*) FROM reservations WHERE api_key = $1", "sk-fb-8")
+    assert count == 1
+
+
+async def test_tier_downgrade_succeeds_after_same_tier_exhausted(db_conn, openai_failing, anthropic_failing, ollama_ok):
+    await _seed_model(db_conn, "gpt-4o-e2e", "openai", tier=4)
+    await _seed_model(db_conn, "claude-e2e", "anthropic", tier=4)
+    await _seed_model(db_conn, "llama-e2e", "ollama", tier=2)
+    await _seed_team(db_conn, "sk-fb-9", ["gpt-4o-e2e", "claude-e2e", "llama-e2e"])
+    team = await _team_dict("sk-fb-9")
+
+    generator, reservation_id = await route_request(
+        _request("gpt-4o-e2e", allow_fallback=True, allow_tier_downgrade=True), team
+    )
+
+    responses = [r async for r in generator]
+    assert responses[0].model == "llama-e2e"
+
+
+async def test_chat_endpoint_streaming_falls_back_and_settles_against_actual_model(
+    db_conn, http_client, openai_failing, anthropic_ok
+):
+    await _seed_model(db_conn, "gpt-4o-e2e", "openai", tier=4, cost=0.01)
+    await _seed_model(db_conn, "claude-e2e", "anthropic", tier=4, cost=0.02)
+    await _seed_team(db_conn, "sk-fb-http-2", ["gpt-4o-e2e", "claude-e2e"])
+
+    response = await http_client.post(
+        "/api/v1/chat/completion",
+        json={
+            "model": "gpt-4o-e2e",
+            "messages": [{"role": "user", "content": "Hello there, this is a test message."}],
+            "max_tokens": 20,
+            "allow_fallback": True,
+            "stream": True,
+        },
+        headers={"Authorization": "Bearer sk-fb-http-2"},
+    )
+
+    assert response.status_code == 200
+
+    import json
+    chunks = [
+        json.loads(line[len("data: "):])
+        for line in response.text.strip().split("\n\n")
+        if line.startswith("data: ")
+    ]
+    assert len(chunks) > 0
+    assert all(c["model"] == "claude-e2e" for c in chunks)
+    final_chunks = [c for c in chunks if c.get("is_final")]
+    assert len(final_chunks) == 1
+
+    reservation_count = await db_conn.fetchval(
+        "SELECT COUNT(*) FROM reservations WHERE api_key = $1", "sk-fb-http-2"
+    )
+    assert reservation_count == 0
+
+    team_row = await db_conn.fetchrow("SELECT current_spend FROM teams WHERE api_key = $1", "sk-fb-http-2")
+    usage = final_chunks[0]["usage"]
+    assert float(team_row["current_spend"]) == pytest.approx(
+        usage["prompt_tokens"] * 0.02 + usage["completion_tokens"] * 0.02
     )

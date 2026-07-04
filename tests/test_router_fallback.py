@@ -87,5 +87,10 @@ def test_non_retryable_status_codes():
         assert is_retryable_status(code) is False
 
 
+def test_unlisted_status_code_is_not_retryable():
+    for code in (404, 405, 408, 409, 418):
+        assert is_retryable_status(code) is False
+
+
 def test_no_provider_available_error_is_an_exception():
     assert issubclass(NoProviderAvailableError, Exception)
