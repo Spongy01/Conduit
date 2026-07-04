@@ -218,6 +218,28 @@ class Database:
 
                 return {"settled": True, "actual_spend": actual_spend}
 
+    async def release_budget(self, api_key: str, reservation_id: str) -> dict:
+        """Cancels a pending reservation without settling it: removes the
+        reservation row and refunds its reserved_amount back out of
+        current_spend. Used when a provider attempt fails and the router
+        needs to try a different candidate without leaving spend reserved
+        against a call that never happened."""
+        async with self.pool.acquire() as connection:
+            async with connection.transaction():
+                reservation = await connection.fetchrow(
+                    "SELECT * FROM reservations WHERE id = $1 AND api_key = $2", reservation_id, api_key
+                )
+                if not reservation:
+                    raise ValueError("Reservation not found")
+
+                await connection.execute("DELETE FROM reservations WHERE id = $1", reservation_id)
+
+                await connection.execute(
+                    "UPDATE teams SET current_spend = current_spend - $1 WHERE api_key = $2",
+                    reservation["reserved_amount"], api_key
+                )
+
+                return {"released": True}
 
 
 # when using compose, set postgres rather than localhost, and use the password set in the docker-compose.yml file

@@ -120,3 +120,43 @@ async def test_settle_budget_unknown_reservation(db_conn, budget_db):
 
     with pytest.raises(ValueError, match="Reservation not found"):
         await budget_db.settle_budget(api_key, "00000000-0000-0000-0000-000000000000", 1.0)
+
+
+# ─── release_budget ────────────────────────────────────────────────────────
+
+async def test_release_budget_deletes_reservation_and_refunds_spend(db_conn, budget_db):
+    api_key = await _seed_team(db_conn, budget_limit=10.0)
+    reservation = await budget_db.reserve_budget(api_key, 4.0)
+
+    result = await budget_db.release_budget(api_key, reservation["reservation_id"])
+
+    assert result == {"released": True}
+
+    team_row = await db_conn.fetchrow("SELECT current_spend FROM teams WHERE api_key = $1", api_key)
+    assert team_row["current_spend"] == pytest.approx(0.0)
+
+    reservation_row = await db_conn.fetchrow(
+        "SELECT * FROM reservations WHERE id = $1", reservation["reservation_id"]
+    )
+    assert reservation_row is None
+
+
+async def test_release_budget_unknown_reservation(db_conn, budget_db):
+    api_key = await _seed_team(db_conn)
+
+    with pytest.raises(ValueError, match="Reservation not found"):
+        await budget_db.release_budget(api_key, "00000000-0000-0000-0000-000000000000")
+
+
+async def test_release_budget_leaves_other_reservations_untouched(db_conn, budget_db):
+    api_key = await _seed_team(db_conn, budget_limit=10.0)
+    keep = await budget_db.reserve_budget(api_key, 3.0)
+    release = await budget_db.reserve_budget(api_key, 2.0)
+
+    await budget_db.release_budget(api_key, release["reservation_id"])
+
+    team_row = await db_conn.fetchrow("SELECT current_spend FROM teams WHERE api_key = $1", api_key)
+    assert team_row["current_spend"] == pytest.approx(3.0)
+
+    kept_row = await db_conn.fetchrow("SELECT * FROM reservations WHERE id = $1", keep["reservation_id"])
+    assert kept_row is not None

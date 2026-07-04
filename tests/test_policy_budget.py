@@ -122,3 +122,24 @@ async def test_settle_budget_unknown_reservation_raises(db_conn):
         await budget_module.settle_budget(
             api_key, "gpt-4o", team, "00000000-0000-0000-0000-000000000000", input_tokens=1, output_tokens=1
         )
+
+
+# ─── release_budget ────────────────────────────────────────────────────────
+
+async def test_release_budget_refunds_reservation(db_conn):
+    api_key = await _seed_team(db_conn, budget_limit=10.0)
+    team = _team(api_key=api_key)
+
+    request = ChatCompletionRequest(
+        model="gpt-4o",
+        messages=[Message(role="user", content="abcdefgh")],
+        max_tokens=3,
+    )
+    reservation = await budget_module.reserve_budget(api_key, team, request)
+
+    result = await budget_module.release_budget(api_key, reservation["reservation_id"])
+
+    assert result == {"released": True}
+
+    row = await db_conn.fetchrow("SELECT current_spend FROM teams WHERE api_key = $1", api_key)
+    assert float(row["current_spend"]) == pytest.approx(0.0)
