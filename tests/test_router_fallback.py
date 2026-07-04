@@ -1,5 +1,5 @@
 from gateway.core.schema import ChatCompletionRequest, Message
-from gateway.router.router import build_fallback_candidates
+from gateway.router.router import build_fallback_candidates, is_retryable_status, NoProviderAvailableError
 
 
 def test_chat_completion_request_fallback_flags_default_false():
@@ -75,3 +75,17 @@ def test_no_candidates_when_tier_exhausted_and_no_downgrade():
     ]
     candidates = build_fallback_candidates("gpt-4o", single_tier_models, failed_provider="openai", allow_tier_downgrade=False)
     assert candidates == []
+
+
+def test_retryable_status_codes():
+    for code in (429, 500, 502, 503, 504):
+        assert is_retryable_status(code) is True
+
+
+def test_non_retryable_status_codes():
+    for code in (400, 401, 403, 422):
+        assert is_retryable_status(code) is False
+
+
+def test_no_provider_available_error_is_an_exception():
+    assert issubclass(NoProviderAvailableError, Exception)

@@ -51,6 +51,23 @@ def build_fallback_candidates(
     return candidates
 
 
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+NON_RETRYABLE_STATUS_CODES = {400, 401, 403, 422}
+
+
+def is_retryable_status(status_code: int) -> bool:
+    """True for upstream failures worth retrying on a different provider
+    (rate limits and server-side errors); False for client-error responses
+    that would fail identically against any provider (bad request, auth,
+    validation)."""
+    return status_code in RETRYABLE_STATUS_CODES
+
+
+class NoProviderAvailableError(Exception):
+    """Raised when every fallback candidate for a request has been
+    attempted (or skipped for budget reasons) and none succeeded."""
+
+
 def route_request(request: ChatCompletionRequest, team: dict):
     """
     Route the request to the appropriate provider based on the model.
