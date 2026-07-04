@@ -96,17 +96,17 @@ class Database:
 
 
     ## Database Operations for Models
-    async def add_model(self, model_name: str, provider: str, cost_per_input_token: float, cost_per_output_token: float):
+    async def add_model(self, model_name: str, provider: str, cost_per_input_token: float, cost_per_output_token: float, tier: int = 1):
         """Inserts a new model row. Raises ValueError if model_name already exists."""
         async with self.pool.acquire() as connection:
             # Insert the new model into the database
             try:
                 await connection.execute(
                     """
-                    INSERT INTO models (name, provider, cost_per_input_token, cost_per_output_token)
-                    VALUES ($1, $2, $3, $4)
+                    INSERT INTO models (name, provider, cost_per_input_token, cost_per_output_token, tier)
+                    VALUES ($1, $2, $3, $4, $5)
                     """,
-                    model_name, provider, cost_per_input_token, cost_per_output_token
+                    model_name, provider, cost_per_input_token, cost_per_output_token, tier
                 )
             except asyncpg.UniqueViolationError:
                 raise ValueError(f"Model {model_name} already exists")
