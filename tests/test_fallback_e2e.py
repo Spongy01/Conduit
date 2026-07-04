@@ -1,3 +1,4 @@
+import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI, HTTPException, Request
@@ -5,7 +6,9 @@ from fastapi.responses import JSONResponse
 
 from gateway.core.database import db as app_db
 from gateway.core.providers import PROVIDERS
+from gateway.core.redis_client import redis_client
 from gateway.core.schema import ChatCompletionRequest, Message
+from gateway.main import app
 from gateway.router.router import route_request, NoProviderAvailableError
 
 from tests.test_provider_usage import _run_app, _stop_app
@@ -187,3 +190,50 @@ async def test_all_candidates_budget_exceeded_raises_value_error(db_conn, openai
 
     with pytest.raises(ValueError, match="Budget limit exceeded"):
         await route_request(_request("gpt-4o-e2e", allow_fallback=True), team)
+
+
+@pytest_asyncio.fixture
+async def http_client():
+    await app_db.connect()
+    redis_client.connect()
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            yield client
+    finally:
+        await app_db.disconnect()
+        await redis_client.disconnect()
+
+
+async def test_chat_endpoint_falls_back_and_settles_against_actual_model(
+    db_conn, http_client, openai_failing, anthropic_ok
+):
+    await _seed_model(db_conn, "gpt-4o-e2e", "openai", tier=4, cost=0.01)
+    await _seed_model(db_conn, "claude-e2e", "anthropic", tier=4, cost=0.02)
+    await _seed_team(db_conn, "sk-fb-http-1", ["gpt-4o-e2e", "claude-e2e"])
+
+    response = await http_client.post(
+        "/api/v1/chat/completion",
+        json={
+            "model": "gpt-4o-e2e",
+            "messages": [{"role": "user", "content": "Hello there, this is a test message."}],
+            "max_tokens": 20,
+            "allow_fallback": True,
+        },
+        headers={"Authorization": "Bearer sk-fb-http-1"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["model"] == "claude-e2e"
+
+    # settlement happened against the model that actually served the
+    # request (claude-e2e's pricing), and no reservation is left dangling
+    reservation_count = await db_conn.fetchval(
+        "SELECT COUNT(*) FROM reservations WHERE api_key = $1", "sk-fb-http-1"
+    )
+    assert reservation_count == 0
+
+    team_row = await db_conn.fetchrow("SELECT current_spend FROM teams WHERE api_key = $1", "sk-fb-http-1")
+    assert float(team_row["current_spend"]) == pytest.approx(
+        body["usage"]["prompt_tokens"] * 0.02 + body["usage"]["completion_tokens"] * 0.02
+    )
