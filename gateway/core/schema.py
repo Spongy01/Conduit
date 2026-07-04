@@ -20,6 +20,9 @@ class ChatCompletionRequest(BaseModel):
     stream: bool = False
     max_tokens: int = 200
 
+    allow_fallback: Optional[bool] = False
+    allow_tier_downgrade: Optional[bool] = False
+
 class Usage(BaseModel):
     """Token counts — this is what Budget settles against."""
     prompt_tokens: int
