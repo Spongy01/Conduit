@@ -63,14 +63,10 @@ class GeminiProvider(BaseProvider):
         async with httpx.AsyncClient(timeout=None) as client:
             async with client.stream("POST", url, headers=headers, json=payload) as response:
 
-                if response.status_code != 200 and request.stream is False:
+                if response.status_code != 200:
                     text = await response.aread()
                     logger.error("Gemini API error status=%s model=%s: %s", response.status_code, model, text)
                     raise HTTPException(status_code=response.status_code, detail=f"Gemini API error: {text}")
-                if response.status_code != 200 and request.stream is True:
-                    text = await response.aread()
-                    logger.error("Gemini API error status=%s model=%s: %s", response.status_code, model, text)
-                    yield ChatCompletionResponse(model=model, delta=f"Gemini API error: {text}")
                 # =========================
                 # STREAMING MODE
                 # =========================

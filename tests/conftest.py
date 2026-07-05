@@ -28,7 +28,8 @@ CREATE_MODELS_TABLE = """
         name TEXT PRIMARY KEY,
         provider TEXT NOT NULL,
         cost_per_input_token FLOAT NOT NULL DEFAULT 0.0,
-        cost_per_output_token FLOAT NOT NULL DEFAULT 0.0
+        cost_per_output_token FLOAT NOT NULL DEFAULT 0.0,
+        tier INTEGER NOT NULL DEFAULT 1
     )
 """
 
@@ -66,6 +67,16 @@ def admin_headers():
 
 @pytest_asyncio.fixture
 async def budget_db():
+    from gateway.core.database import Database
+
+    database = Database(dsn=TEST_DATABASE_URL)
+    await database.connect()
+    yield database
+    await database.disconnect()
+
+
+@pytest_asyncio.fixture
+async def team_config_db():
     from gateway.core.database import Database
 
     database = Database(dsn=TEST_DATABASE_URL)

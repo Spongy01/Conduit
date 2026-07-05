@@ -2,13 +2,13 @@
 which models the gateway knows about and their per-token pricing."""
 from gateway.core.database import db
 
-async def add_model(model_name: str, provider: str, cost_per_input_token: float, cost_per_output_token: float) -> None:
+async def add_model(model_name: str, provider: str, cost_per_input_token: float, cost_per_output_token: float, tier: int = 1) -> None:
     """
     Adds a new model to the source of truth (the stub dict for now,
     Postgres later).
     """
     try:
-        await db.add_model(model_name, provider, cost_per_input_token, cost_per_output_token)
+        await db.add_model(model_name, provider, cost_per_input_token, cost_per_output_token, tier)
     except ValueError as e:
         raise ValueError(str(e))
 

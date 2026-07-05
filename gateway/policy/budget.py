@@ -69,3 +69,15 @@ async def settle_budget(
     )
 
     return await db.settle_budget(api_key, reservation_id, actual_cost)
+
+
+async def release_budget(api_key: str, reservation_id: str) -> dict:
+    """
+    Cancels a reservation that was made for a provider attempt that failed
+    before completing, refunding its reserved amount. Unlike settle_budget,
+    no token counts are involved — the call never produced usage to bill.
+    Raises ValueError if the reservation_id is unknown (propagated from
+    db.release_budget).
+    """
+    logger.debug("Releasing budget api_key=%s reservation_id=%s", api_key, reservation_id)
+    return await db.release_budget(api_key, reservation_id)

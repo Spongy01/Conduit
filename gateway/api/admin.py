@@ -32,11 +32,13 @@ class UpdateTeamRequest(BaseModel):
 
 class CreateModelRequest(BaseModel):
     """Body for POST/PATCH /v1/models: registers or updates a model's
-    provider and per-token pricing used for budget estimation."""
+    provider, per-token pricing, and capability tier (used for fallback
+    routing — higher tier means more capable)."""
     model_name: str
     provider: str
     cost_per_input_token: float = 0.0
     cost_per_output_token: float = 0.0
+    tier: int = 1
 
 ######################################
 #### Endpoints for Managing Teams ####

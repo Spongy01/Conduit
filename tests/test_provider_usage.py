@@ -4,6 +4,8 @@ import socket
 import pytest
 import pytest_asyncio
 import uvicorn
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from gateway.core.schema import ChatCompletionRequest, Message
 from gateway.providers.AnthropicProvider import AnthropicProvider
@@ -61,6 +63,44 @@ async def gemini_server():
 @pytest_asyncio.fixture
 async def ollama_server():
     server, task, url = await _run_app(ollama_app)
+    yield url
+    await _stop_app(server, task)
+
+
+def _failing_app(status_code: int) -> FastAPI:
+    app = FastAPI()
+
+    @app.post("/{path:path}")
+    async def _fail(path: str, request: Request):
+        return JSONResponse(status_code=status_code, content={"error": "simulated upstream failure"})
+
+    return app
+
+
+@pytest_asyncio.fixture
+async def failing_openai_server():
+    server, task, url = await _run_app(_failing_app(500))
+    yield url
+    await _stop_app(server, task)
+
+
+@pytest_asyncio.fixture
+async def failing_anthropic_server():
+    server, task, url = await _run_app(_failing_app(500))
+    yield url
+    await _stop_app(server, task)
+
+
+@pytest_asyncio.fixture
+async def failing_gemini_server():
+    server, task, url = await _run_app(_failing_app(500))
+    yield url
+    await _stop_app(server, task)
+
+
+@pytest_asyncio.fixture
+async def failing_ollama_server():
+    server, task, url = await _run_app(_failing_app(500))
     yield url
     await _stop_app(server, task)
 
@@ -199,3 +239,44 @@ async def test_ollama_streaming_usage(ollama_server):
     assert len(final_chunks) == 1
     assert final_chunks[0].usage.completion_tokens > 0
     assert text_chunks[0].usage.prompt_tokens > 0
+
+
+# ─── Streaming errors raise instead of yielding a fake chunk ──────────────
+
+async def test_openai_streaming_error_raises(failing_openai_server):
+    from fastapi import HTTPException
+    provider = OpenAIProvider(api_key="dummy")
+    provider._base_url = failing_openai_server
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _collect(provider, _request(stream=True))
+    assert exc_info.value.status_code == 500
+
+
+async def test_anthropic_streaming_error_raises(failing_anthropic_server):
+    from fastapi import HTTPException
+    provider = AnthropicProvider(api_key="dummy")
+    provider._base_url = failing_anthropic_server
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _collect(provider, _request(stream=True))
+    assert exc_info.value.status_code == 500
+
+
+async def test_gemini_streaming_error_raises(failing_gemini_server):
+    from fastapi import HTTPException
+    provider = GeminiProvider(api_key="dummy")
+    provider.base_url = f"{failing_gemini_server}/v1beta/models"
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _collect(provider, _request(stream=True))
+    assert exc_info.value.status_code == 500
+
+
+async def test_ollama_streaming_error_raises(failing_ollama_server):
+    from fastapi import HTTPException
+    provider = OllamaProvider(base_url=failing_ollama_server)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _collect(provider, _request(stream=True))
+    assert exc_info.value.status_code == 500

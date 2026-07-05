@@ -171,3 +171,30 @@ async def test_delete_model_not_found(client, admin_headers):
     )
     assert r.status_code == 404
     assert "does not exist" in r.json()["detail"]
+
+
+async def test_create_model_with_tier(client, db_conn, admin_headers):
+    payload = {
+        "model_name": "tiered-model",
+        "provider": "openai",
+        "cost_per_input_token": 0.001,
+        "cost_per_output_token": 0.002,
+        "tier": 3,
+    }
+    r = await client.post("/admin/v1/models", json=payload, headers=admin_headers)
+    assert r.status_code == 200
+
+    row = await db_conn.fetchrow("SELECT * FROM models WHERE name = $1", "tiered-model")
+    assert row["tier"] == 3
+
+
+async def test_create_model_default_tier(client, db_conn, admin_headers):
+    payload = {
+        "model_name": "default-tier-model",
+        "provider": "openai",
+    }
+    r = await client.post("/admin/v1/models", json=payload, headers=admin_headers)
+    assert r.status_code == 200
+
+    row = await db_conn.fetchrow("SELECT * FROM models WHERE name = $1", "default-tier-model")
+    assert row["tier"] == 1

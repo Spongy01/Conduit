@@ -65,14 +65,10 @@ class AnthropicProvider(BaseProvider):
                 json=payload,
             ) as response:
 
-                if response.status_code != 200 and request.stream is False:
+                if response.status_code != 200:
                     text = await response.aread()
                     logger.error("Anthropic API error status=%s model=%s: %s", response.status_code, model, text)
                     raise HTTPException(status_code=response.status_code, detail=f"Anthropic API error: {text}")
-                if response.status_code != 200 and request.stream is True:
-                    text = await response.aread()
-                    logger.error("Anthropic API error status=%s model=%s: %s", response.status_code, model, text)
-                    yield ChatCompletionResponse(model=model, delta=f"Anthropic API error: {text}")
                 # =========================
                 # STREAMING MODE
                 # =========================

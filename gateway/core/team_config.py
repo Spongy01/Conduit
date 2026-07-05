@@ -139,6 +139,7 @@ async def get_team_config(api_key: str) -> dict | None:
                 "provider": model["provider"],
                 "cost_per_input_token": model["cost_per_input_token"],
                 "cost_per_output_token": model["cost_per_output_token"],
+                "tier": model["tier"],
             })
 
     team["allowed_models"] = enriched_models

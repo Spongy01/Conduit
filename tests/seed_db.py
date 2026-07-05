@@ -11,10 +11,10 @@ DATABASE_URL = os.environ.get(
 )
 
 MODELS = [
-    {"name": "gpt-4o", "provider": "openai", "cost_per_input_token": 0.0000025, "cost_per_output_token": 0.00001},
-    {"name": "gpt-4o-mini", "provider": "openai", "cost_per_input_token": 0.00000015, "cost_per_output_token": 0.0000006},
-    {"name": "claude-sonnet-4-6", "provider": "anthropic", "cost_per_input_token": 0.000003, "cost_per_output_token": 0.000015},
-    {"name": "gemini-2.0-flash", "provider": "gemini", "cost_per_input_token": 0.0000001, "cost_per_output_token": 0.0000004},
+    {"name": "gpt-4o", "provider": "openai", "cost_per_input_token": 0.0000025, "cost_per_output_token": 0.00001, "tier": 4},
+    {"name": "gpt-4o-mini", "provider": "openai", "cost_per_input_token": 0.00000015, "cost_per_output_token": 0.0000006, "tier": 2},
+    {"name": "claude-sonnet-4-6", "provider": "anthropic", "cost_per_input_token": 0.000003, "cost_per_output_token": 0.000015, "tier": 4},
+    {"name": "gemini-2.0-flash", "provider": "gemini", "cost_per_input_token": 0.0000001, "cost_per_output_token": 0.0000004, "tier": 2},
 ]
 
 TEAMS = [
@@ -67,7 +67,8 @@ async def seed():
                 name TEXT PRIMARY KEY,
                 provider TEXT NOT NULL,
                 cost_per_input_token FLOAT NOT NULL DEFAULT 0.0,
-                cost_per_output_token FLOAT NOT NULL DEFAULT 0.0
+                cost_per_output_token FLOAT NOT NULL DEFAULT 0.0,
+                tier INTEGER NOT NULL DEFAULT 1
             )
         """)
 
@@ -75,8 +76,8 @@ async def seed():
         for m in MODELS:
             try:
                 await conn.execute(
-                    "INSERT INTO models (name, provider, cost_per_input_token, cost_per_output_token) VALUES ($1, $2, $3, $4)",
-                    m["name"], m["provider"], m["cost_per_input_token"], m["cost_per_output_token"],
+                    "INSERT INTO models (name, provider, cost_per_input_token, cost_per_output_token, tier) VALUES ($1, $2, $3, $4, $5)",
+                    m["name"], m["provider"], m["cost_per_input_token"], m["cost_per_output_token"], m["tier"],
                 )
                 inserted_models += 1
             except asyncpg.UniqueViolationError:

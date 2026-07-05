@@ -1,19 +1,18 @@
 """Chat completion API: authenticates the caller, enforces model access,
-rate limits, and budget, then routes the request to a provider and streams
-or returns its response."""
+rate limits, and budget, then routes the request to a provider (with
+automatic fallback) and streams or returns its response."""
 import logging
 import math
 from fastapi import APIRouter, Depends
-from gateway.core.schema import ChatCompletionRequest
-from gateway.providers.BaseProvider import BaseProvider
-from gateway.providers.OpenAIProvider import OpenAIProvider
+from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse
 from fastapi.responses import StreamingResponse
 from fastapi import HTTPException
 from gateway.auth.authenticate import authenticate
 from gateway.policy.model_access import raise_if_model_not_allowed
 from gateway.policy.rate_limiter import check_rate_limit
-from gateway.policy.budget import reserve_budget, settle_budget
-from gateway.router.router import route_request
+from gateway.policy.budget import settle_budget
+from gateway.router.router import route_request, NoProviderAvailableError
+from typing import AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -29,23 +28,30 @@ async def _settle_quietly(api_key: str, model: str, team: dict, reservation_id: 
         logger.warning("Failed to settle budget reservation_id=%s: %s", reservation_id, e)
 
 
-async def return_streaming_response(request: ChatCompletionRequest, provider: BaseProvider,
-                                     team: dict, reservation_id: str):
+async def return_streaming_response(generator: AsyncGenerator[ChatCompletionResponse, None],
+                                     team: dict, reservation_id: str, requested_model: str):
     """
-    Handle streaming response for chat completion requests.
-    This function processes the request and yields responses as they are generated.
+    Streams the router's winning generator to the client, settling budget
+    against whichever model actually served the request once the stream
+    ends.
     """
     final_usage = None
-    async for response in provider.generate(request):
+    actual_model = requested_model
+    async for response in generator:
+        actual_model = response.model
         if response.is_final and response.usage is not None:
             final_usage = response.usage
         yield "data: " + response.model_dump_json() + "\n\n"
 
+    if actual_model != requested_model:
+        logger.info("Fallback served team_id=%s requested_model=%s actual_model=%s",
+                    team.get("team_id"), requested_model, actual_model)
+
     if final_usage is not None:
-        await _settle_quietly(team["api_key"], request.model, team, reservation_id,
+        await _settle_quietly(team["api_key"], actual_model, team, reservation_id,
                                final_usage.prompt_tokens, final_usage.completion_tokens)
     else:
-        await _settle_quietly(team["api_key"], request.model, team, reservation_id, 0, 0)
+        await _settle_quietly(team["api_key"], actual_model, team, reservation_id, 0, 0)
 
 
 @router.post("/v1/chat/completion")
@@ -83,33 +89,30 @@ async def chat_completion(request: ChatCompletionRequest,
                             headers={"Retry-After": str(retry_after)})
 
     ##############
-    # Budget Enforcement logic (pre flight, reserve budget)
+    # Routing (reserves budget per attempt and falls back on retryable failures)
     ##############
-
     try:
-        reservation = await reserve_budget(team["api_key"], team, request)
+        generator, reservation_id = await route_request(request, team)
+    except NoProviderAvailableError as e:
+        logger.error("No provider available team_id=%s model=%s: %s", team_id, request.model, e)
+        raise HTTPException(status_code=503, detail=str(e))
     except ValueError as e:
         logger.warning("Budget reservation denied team_id=%s model=%s: %s", team_id, request.model, e)
         raise HTTPException(status_code=402, detail=str(e))
 
-    reservation_id = reservation["reservation_id"]
-
-    # get provider from router
-    provider = route_request(request, team)
-
     #streaming status
     stream = request.stream
 
-    logger.debug("Calling provider=%s team_id=%s model=%s", type(provider).__name__, team_id, request.model)
+    logger.debug("Routed team_id=%s requested_model=%s", team_id, request.model)
 
     # Streaming mode: Return a streaming response if requested.
     if stream:
-        return StreamingResponse(return_streaming_response(request, provider, team, reservation_id))
+        return StreamingResponse(return_streaming_response(generator, team, reservation_id, request.model))
 
     # Non-streaming mode: Call the provider for chat_completion and return the response.
     response_list = []
     try:
-        async for response in provider.generate(request):
+        async for response in generator:
             response_list.append(response)
     except HTTPException:
         await _settle_quietly(team["api_key"], request.model, team, reservation_id, 0, 0)
@@ -123,11 +126,15 @@ async def chat_completion(request: ChatCompletionRequest,
         raise HTTPException(status_code=500, detail="No response generated.")
     if len(response_list) == 1:
         response = response_list[0]
+        actual_model = response.model
+        if actual_model != request.model:
+            logger.info("Fallback served team_id=%s requested_model=%s actual_model=%s",
+                        team_id, request.model, actual_model)
         if response.usage is not None:
-            await _settle_quietly(team["api_key"], request.model, team, reservation_id,
+            await _settle_quietly(team["api_key"], actual_model, team, reservation_id,
                                    response.usage.prompt_tokens, response.usage.completion_tokens)
         else:
-            await _settle_quietly(team["api_key"], request.model, team, reservation_id, 0, 0)
+            await _settle_quietly(team["api_key"], actual_model, team, reservation_id, 0, 0)
         return response.model_dump()
 
     # should not have more than 1 response in non-streaming mode, but if it does, return error
