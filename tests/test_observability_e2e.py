@@ -25,3 +25,69 @@ async def test_metrics_endpoint_returns_prometheus_text_format():
         "time_to_first_token_seconds",
     ]:
         assert metric_name in body, f"{metric_name} missing from /metrics output"
+
+
+import pytest_asyncio
+
+from gateway.core import metrics
+from gateway.core.database import db as app_db
+from gateway.core.redis_client import redis_client
+
+
+def _counter_value(counter, **labels):
+    return counter.labels(**labels)._value.get()
+
+
+@pytest_asyncio.fixture
+async def db_and_redis():
+    """Connects the app's shared db/redis singletons for tests that call
+    gateway code directly (route_request, get_team_config, check_rate_limit,
+    authenticate) rather than through an HTTP fixture. NOT autouse: tests
+    that use `app_client`/`openai_ok`-style fixtures imported from other
+    test modules already connect these themselves, and connecting twice in
+    the same test leaks a pool/client and makes teardown double-close it —
+    so only the tests in this file that need a bare connection request this
+    fixture explicitly."""
+    await app_db.connect()
+    redis_client.connect()
+    yield
+    await app_db.disconnect()
+    await redis_client.disconnect()
+
+
+async def test_cache_miss_then_hit_increments_counters(db_and_redis):
+    import uuid
+
+    from gateway.core.cache import get_team_config, set_team_config
+
+    # Exercises cache.py directly (not through team_config.py's DB-backed
+    # get_team_config): a *separate* pre-existing bug means set_team_config
+    # silently fails to write when a team dict carries Postgres's Decimal
+    # current_spend (redis-py can't serialize Decimal, and the failure is
+    # swallowed by cache.py's own except Exception) — that path can never
+    # produce a real cache hit today. Out of scope to fix here; testing
+    # cache.py's hit/miss counting with plain JSON-safe data sidesteps it
+    # and is a more precise test of exactly what this task instruments.
+    api_key = f"sk-obs-cache-{uuid.uuid4().hex[:12]}"
+    team_config = {
+        "team_id": f"team-{api_key}",
+        "team_name": "Obs Cache Team",
+        "allowed_models": [{"name": "obs-cache-model", "provider": "openai", "tier": 1}],
+        "rate_limit": "100",
+        "budget_limit": "50.0",
+        "budget_period": "monthly",
+    }
+
+    misses_before = _counter_value(metrics.cache_misses_total, cache_type="team_config")
+    hits_before = _counter_value(metrics.cache_hits_total, cache_type="team_config")
+
+    miss = await get_team_config(api_key)  # miss: nothing cached yet
+    assert miss is None
+    assert _counter_value(metrics.cache_misses_total, cache_type="team_config") == misses_before + 1
+
+    await set_team_config(api_key, team_config)
+
+    hit = await get_team_config(api_key)  # hit: cached by the call above
+    assert hit is not None
+    assert hit["team_id"] == team_config["team_id"]
+    assert _counter_value(metrics.cache_hits_total, cache_type="team_config") == hits_before + 1
