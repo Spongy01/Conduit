@@ -3,6 +3,21 @@ import asyncpg
 import httpx
 import pytest
 import pytest_asyncio
+from opentelemetry import trace
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+# Installed once, at collection time, so every manual span created via
+# gateway.core.tracer.tracer during the test session lands here instead of
+# being a no-op or (if gateway.main's lifespan ever ran) going to a real
+# OTLP collector. OTel only honors the *first* set_tracer_provider() call
+# per process, so this must run before anything else has a chance to set one.
+test_span_exporter = InMemorySpanExporter()
+_test_tracer_provider = TracerProvider(resource=Resource.create({"service.name": "conduit-gateway-test"}))
+_test_tracer_provider.add_span_processor(SimpleSpanProcessor(test_span_exporter))
+trace.set_tracer_provider(_test_tracer_provider)
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
@@ -41,6 +56,14 @@ CREATE_RESERVATIONS_TABLE = """
         reserved_at TIMESTAMP NOT NULL DEFAULT now()
     )
 """
+
+
+@pytest.fixture(autouse=True)
+def _clear_spans():
+    """Every test starts with an empty span buffer, so span-count/content
+    assertions in one test never see spans left over from another."""
+    test_span_exporter.clear()
+    yield
 
 
 @pytest_asyncio.fixture(autouse=True)
