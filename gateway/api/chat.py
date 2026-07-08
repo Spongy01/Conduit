@@ -78,7 +78,8 @@ async def chat_completion(request: ChatCompletionRequest,
     allowed = await check_rate_limit(
         team_id=team["team_id"],
         capacity=team["rate_limit"],
-        fill_rate=team["rate_limit"] / 60.0)
+        fill_rate=team["rate_limit"] / 60.0,
+        model=request.model)
 
     logger.debug("Rate limit result team_id=%s allowed=%s", team_id, allowed)
 

@@ -91,3 +91,31 @@ async def test_cache_miss_then_hit_increments_counters(db_and_redis):
     assert hit is not None
     assert hit["team_id"] == team_config["team_id"]
     assert _counter_value(metrics.cache_hits_total, cache_type="team_config") == hits_before + 1
+
+
+async def test_ratelimit_rejection_increments_counter_and_emits_span(db_conn, db_and_redis, span_exporter):
+    import uuid
+
+    from gateway.policy.rate_limiter import check_rate_limit
+
+    # A unique team_id per run: the rate limiter's Redis bucket has no TTL
+    # and nothing truncates Redis state between tests the way db_conn
+    # truncates Postgres tables, so a literal fixed team_id would see an
+    # already-exhausted bucket left over from a previous run in the same
+    # Redis instance.
+    team_id = f"team-obs-rl-{uuid.uuid4().hex[:12]}"
+
+    before = _counter_value(metrics.ratelimit_rejections_total, team_id=team_id, model="obs-rl-model")
+
+    allowed_1 = await check_rate_limit(team_id=team_id, capacity=1, fill_rate=0.0, model="obs-rl-model")
+    assert allowed_1 is True
+    allowed_2 = await check_rate_limit(team_id=team_id, capacity=1, fill_rate=0.0, model="obs-rl-model")
+    assert allowed_2 is False
+
+    assert _counter_value(metrics.ratelimit_rejections_total, team_id=team_id, model="obs-rl-model") == before + 1
+
+    spans = [s for s in span_exporter.get_finished_spans() if s.name == "conduit.rate_limit"]
+    assert len(spans) == 2
+    assert spans[0].attributes["team_id"] == team_id
+    assert spans[0].attributes["allowed"] is True
+    assert spans[1].attributes["allowed"] is False

@@ -66,6 +66,22 @@ def _clear_spans():
     yield
 
 
+@pytest.fixture
+def span_exporter():
+    """Returns the actual InMemorySpanExporter backing the process-wide
+    OTel tracer provider set above. Tests must use this fixture rather than
+    `from tests.conftest import test_span_exporter`: since tests/ has no
+    __init__.py, pytest imports this file as a bare `conftest` module for
+    its own fixture loading, while an explicit dotted import resolves as
+    the separate module `tests.conftest` — Python doesn't dedupe those by
+    file path, so a direct import silently re-executes this file's
+    top-level code, producing a second exporter that never receives real
+    spans (and a second TracerProvider that OTel's "first set wins" rule
+    ignores, logging an "Overriding of current TracerProvider is not
+    allowed" warning in the process)."""
+    return test_span_exporter
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def db_conn():
     conn = await asyncpg.connect(TEST_DATABASE_URL)
