@@ -116,7 +116,14 @@ docker compose -f infra/docker-compose.yaml up -d   # Postgres
 There's no `requirements.txt` yet — install the direct dependencies:
 
 ```bash
-pip install fastapi uvicorn asyncpg httpx pydantic "redis>=8" python-dotenv
+pip install fastapi uvicorn asyncpg httpx pydantic "redis>=8" python-dotenv \
+  prometheus-client \
+  opentelemetry-api opentelemetry-sdk \
+  opentelemetry-exporter-otlp-proto-grpc \
+  opentelemetry-instrumentation-fastapi \
+  opentelemetry-instrumentation-asyncpg \
+  opentelemetry-instrumentation-redis \
+  opentelemetry-instrumentation-httpx
 uvicorn gateway.main:app --reload
 ```
 
