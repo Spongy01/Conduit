@@ -3,6 +3,7 @@ source of truth in core/team_config.py. Every function swallows Redis
 errors and treats them as a cache miss, so the gateway degrades to
 hitting Postgres directly rather than failing requests if Redis is down."""
 import logging
+from decimal import Decimal
 from gateway.core.redis_client import redis_client as cache
 from gateway.core import metrics
 import json
@@ -42,6 +43,13 @@ async def set_team_config(api_key: str, team_config: dict) -> None:
         # (Redis hashes only store flat string values, not nested lists)
         if "allowed_models" in team_config_copy:
             team_config_copy["allowed_models"] = json.dumps(team_config_copy["allowed_models"])
+        # db.get_team() returns numeric Postgres columns (e.g. current_spend,
+        # a NUMERIC(10,2)) as Decimal via asyncpg, which redis-py can't
+        # serialize on its own — coerce to float so the write doesn't fail.
+        team_config_copy = {
+            k: float(v) if isinstance(v, Decimal) else v
+            for k, v in team_config_copy.items()
+        }
         await cache.hset(f"team:{api_key}:config", team_config_copy, expire=90)
 
     except Exception as e:

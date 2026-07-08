@@ -61,13 +61,9 @@ async def test_cache_miss_then_hit_increments_counters(db_and_redis):
     from gateway.core.cache import get_team_config, set_team_config
 
     # Exercises cache.py directly (not through team_config.py's DB-backed
-    # get_team_config): a *separate* pre-existing bug means set_team_config
-    # silently fails to write when a team dict carries Postgres's Decimal
-    # current_spend (redis-py can't serialize Decimal, and the failure is
-    # swallowed by cache.py's own except Exception) — that path can never
-    # produce a real cache hit today. Out of scope to fix here; testing
-    # cache.py's hit/miss counting with plain JSON-safe data sidesteps it
-    # and is a more precise test of exactly what this task instruments.
+    # get_team_config) with plain JSON-safe data, keeping this test focused
+    # on hit/miss counting. See test_set_team_config_with_decimal_value_caches_successfully
+    # below for the Decimal-specific regression test.
     api_key = f"sk-obs-cache-{uuid.uuid4().hex[:12]}"
     team_config = {
         "team_id": f"team-{api_key}",
@@ -91,6 +87,37 @@ async def test_cache_miss_then_hit_increments_counters(db_and_redis):
     assert hit is not None
     assert hit["team_id"] == team_config["team_id"]
     assert _counter_value(metrics.cache_hits_total, cache_type="team_config") == hits_before + 1
+
+
+async def test_set_team_config_with_decimal_value_caches_successfully(db_and_redis):
+    import uuid
+    from decimal import Decimal
+
+    from gateway.core.cache import get_team_config, set_team_config
+
+    # Regression test: db.get_team() returns current_spend as a Decimal
+    # (Postgres NUMERIC(10,2) via asyncpg), and redis-py's hset can't
+    # serialize Decimal on its own. set_team_config must coerce it before
+    # handing the dict to redis-py, or every write silently fails (caught
+    # by set_team_config's own except Exception) and the cache never
+    # actually populates for any real team, ever.
+    api_key = f"sk-obs-cache-decimal-{uuid.uuid4().hex[:12]}"
+    team_config = {
+        "team_id": f"team-{api_key}",
+        "team_name": "Obs Cache Decimal Team",
+        "allowed_models": [{"name": "obs-cache-model", "provider": "openai", "tier": 1}],
+        "rate_limit": "100",
+        "budget_limit": "50.0",
+        "current_spend": Decimal("12.34"),
+        "budget_period": "monthly",
+    }
+
+    await set_team_config(api_key, team_config)
+
+    hit = await get_team_config(api_key)
+    assert hit is not None, "cache write with a Decimal value must not silently fail"
+    assert hit["team_id"] == team_config["team_id"]
+    assert float(hit["current_spend"]) == 12.34
 
 
 async def test_ratelimit_rejection_increments_counter_and_emits_span(db_conn, db_and_redis, span_exporter):

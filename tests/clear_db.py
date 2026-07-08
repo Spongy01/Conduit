@@ -15,8 +15,12 @@ async def clear():
     try:
         teams_deleted = await conn.fetchval("SELECT COUNT(*) FROM teams")
         models_deleted = await conn.fetchval("SELECT COUNT(*) FROM models")
-        await conn.execute("TRUNCATE teams, models")
-        print(f"Cleared {teams_deleted} team(s) and {models_deleted} model(s).")
+        reservations_deleted = await conn.fetchval("SELECT COUNT(*) FROM reservations")
+        # reservations has a foreign key on teams, so it must be truncated
+        # in the same statement (or CASCADE'd) — truncating teams alone
+        # raises FeatureNotSupportedError.
+        await conn.execute("TRUNCATE reservations, teams, models")
+        print(f"Cleared {teams_deleted} team(s), {models_deleted} model(s), and {reservations_deleted} reservation(s).")
     except asyncpg.UndefinedTableError:
         print("Tables do not exist — nothing to clear.")
     finally:
