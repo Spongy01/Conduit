@@ -171,3 +171,76 @@ async def test_authenticate_emits_span_with_team_id(db_conn, db_and_redis, span_
     spans = [s for s in span_exporter.get_finished_spans() if s.name == "conduit.auth"]
     assert len(spans) == 1
     assert spans[0].attributes["team_id"] == "team-obs-auth-1"
+
+
+from tests.test_fallback_e2e import (
+    openai_ok, anthropic_ok, openai_failing,
+    _seed_model as _fb_seed_model, _seed_team as _fb_seed_team,
+    _request as _fb_request, _team_dict as _fb_team_dict,
+)
+
+
+def _histogram_count(histogram, **labels):
+    # prometheus_client's Histogram child has no _count attribute; each
+    # element of _buckets is a raw (non-cumulative) per-bucket counter, and
+    # the total observation count (what the exposition format calls
+    # `<name>_count`) is their sum, computed cumulatively only at export time.
+    child = histogram.labels(**labels)
+    return sum(bucket.get() for bucket in child._buckets)
+
+
+async def test_router_records_provider_success_metrics(db_conn, db_and_redis, openai_ok):
+    await _fb_seed_model(db_conn, "obs-router-success", "openai", tier=4)
+    await _fb_seed_team(db_conn, "sk-obs-router-1", ["obs-router-success"])
+    team = await _fb_team_dict("sk-obs-router-1")
+
+    from gateway.router.router import route_request
+
+    requests_before = _counter_value(
+        metrics.provider_requests_total, provider="openai", model="obs-router-success", status="success"
+    )
+    latency_count_before = _histogram_count(
+        metrics.provider_latency_seconds, provider="openai", model="obs-router-success", status="success"
+    )
+
+    generator, reservation_id = await route_request(_fb_request("obs-router-success"), team)
+    [r async for r in generator]
+
+    assert _counter_value(
+        metrics.provider_requests_total, provider="openai", model="obs-router-success", status="success"
+    ) == requests_before + 1
+    assert _histogram_count(
+        metrics.provider_latency_seconds, provider="openai", model="obs-router-success", status="success"
+    ) == latency_count_before + 1
+
+
+async def test_router_records_fallback_event_and_attempt_spans(db_conn, db_and_redis, openai_failing, anthropic_ok, span_exporter):
+    from gateway.router.router import route_request
+
+    await _fb_seed_model(db_conn, "obs-router-2a", "openai", tier=4)
+    await _fb_seed_model(db_conn, "obs-router-2b", "anthropic", tier=4)
+    await _fb_seed_team(db_conn, "sk-obs-router-2", ["obs-router-2a", "obs-router-2b"])
+    team = await _fb_team_dict("sk-obs-router-2")
+
+    fallback_before = _counter_value(
+        metrics.fallback_events_total, from_provider="openai", to_provider="anthropic", model="obs-router-2a"
+    )
+
+    generator, reservation_id = await route_request(_fb_request("obs-router-2a", allow_fallback=True), team)
+    [r async for r in generator]
+
+    assert _counter_value(
+        metrics.fallback_events_total, from_provider="openai", to_provider="anthropic", model="obs-router-2a"
+    ) == fallback_before + 1
+
+    spans = span_exporter.get_finished_spans()
+    assert "conduit.route_request" in [s.name for s in spans]
+
+    attempt_spans = [s for s in spans if s.name == "conduit.provider.attempt"]
+    assert len(attempt_spans) == 2
+    outcomes = sorted(s.attributes["outcome"] for s in attempt_spans)
+    assert outcomes == ["retryable_error", "success"]
+    is_fallback_values = sorted(s.attributes["is_fallback"] for s in attempt_spans)
+    assert is_fallback_values == [False, True]
+    attempt_numbers = sorted(s.attributes["attempt_number"] for s in attempt_spans)
+    assert attempt_numbers == [1, 2]
