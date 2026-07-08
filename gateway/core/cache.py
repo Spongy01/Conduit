@@ -4,6 +4,7 @@ errors and treats them as a cache miss, so the gateway degrades to
 hitting Postgres directly rather than failing requests if Redis is down."""
 import logging
 from gateway.core.redis_client import redis_client as cache
+from gateway.core import metrics
 import json
 
 logger = logging.getLogger(__name__)
@@ -16,11 +17,13 @@ async def get_team_config(api_key: str) -> dict | None:
         # print(f"In team config, got team: {team}")
         if team:
             logger.debug("Cache hit for team config api_key=%s", api_key)
+            metrics.cache_hits_total.labels(cache_type="team_config").inc()
             # Deserialize allowed_models from JSON string back to list
             if "allowed_models" in team:
                 team["allowed_models"] = json.loads(team["allowed_models"])
             return team
         logger.debug("Cache miss for team config api_key=%s", api_key)
+        metrics.cache_misses_total.labels(cache_type="team_config").inc()
         return None
     except Exception as e:
         # If there's an error (e.g., Redis not connected), we can log it or handle it as needed

@@ -5,6 +5,7 @@ a retryable error. Also owns budget reservation/release for each attempt —
 chat.py only settles the reservation the router hands back."""
 import logging
 import random
+import time
 from typing import AsyncGenerator
 
 import httpx
@@ -12,6 +13,8 @@ from fastapi import HTTPException
 
 from gateway.core.providers import PROVIDERS
 from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse
+from gateway.core import metrics
+from gateway.core.tracer import tracer
 from gateway.policy.budget import reserve_budget, release_budget
 
 logger = logging.getLogger(__name__)
@@ -117,83 +120,139 @@ async def route_request(request: ChatCompletionRequest, team: dict) -> tuple[Asy
         NoProviderAvailableError: at least one real provider attempt failed
             and no candidate (including any budget-skipped ones) succeeded.
     """
-    allowed_models = team.get("allowed_models", [])
-    requested = next((m for m in allowed_models if m["name"] == request.model), None)
-    if requested is None:
-        raise HTTPException(status_code=403, detail=f"Model '{request.model}' is not allowed.")
+    with tracer.start_as_current_span("conduit.route_request"):
+        allowed_models = team.get("allowed_models", [])
+        requested = next((m for m in allowed_models if m["name"] == request.model), None)
+        if requested is None:
+            raise HTTPException(status_code=403, detail=f"Model '{request.model}' is not allowed.")
 
-    candidates = [requested]
-    fallback_computed = False
-    budget_failures = 0
-    provider_failures = 0
-    index = 0
+        candidates = [requested]
+        fallback_computed = False
+        budget_failures = 0
+        provider_failures = 0
+        index = 0
+        previous_provider = None
 
-    while index < len(candidates):
-        candidate = candidates[index]
-        index += 1
+        while index < len(candidates):
+            candidate = candidates[index]
+            index += 1
+            attempt_number = index
+            is_fallback = attempt_number > 1
 
-        provider = PROVIDERS.get(candidate["provider"])
-        if provider is None:
-            logger.error("No provider registered for '%s' (model=%s)", candidate["provider"], candidate["name"])
-            provider_failures += 1
-            continue
+            if is_fallback:
+                metrics.fallback_events_total.labels(
+                    from_provider=previous_provider, to_provider=candidate["provider"], model=request.model
+                ).inc()
+            previous_provider = candidate["provider"]
 
-        provider_request = request.model_copy(update={"model": candidate["name"]})
+            with tracer.start_as_current_span("conduit.provider.attempt") as attempt_span:
+                attempt_span.set_attribute("provider", candidate["provider"])
+                attempt_span.set_attribute("model", candidate["name"])
+                attempt_span.set_attribute("attempt_number", attempt_number)
+                attempt_span.set_attribute("is_fallback", is_fallback)
 
-        try:
-            reservation = await reserve_budget(team["api_key"], team, provider_request)
-        except ValueError as e:
-            logger.warning("Budget reservation denied model=%s: %s", candidate["name"], e)
-            budget_failures += 1
-            if request.allow_fallback and not fallback_computed:
-                candidates.extend(build_fallback_candidates(
-                    request.model, allowed_models, candidate["provider"], request.allow_tier_downgrade
-                ))
-                fallback_computed = True
-            continue
+                provider = PROVIDERS.get(candidate["provider"])
+                if provider is None:
+                    logger.error("No provider registered for '%s' (model=%s)", candidate["provider"], candidate["name"])
+                    provider_failures += 1
+                    attempt_span.set_attribute("outcome", "non_retryable_error")
+                    metrics.provider_requests_total.labels(
+                        provider=candidate["provider"], model=candidate["name"], status="non_retryable_error"
+                    ).inc()
+                    continue
 
-        reservation_id = reservation["reservation_id"]
+                provider_request = request.model_copy(update={"model": candidate["name"]})
 
-        try:
-            generator = await _start_attempt(provider, provider_request)
-            if candidate["name"] != request.model:
-                logger.info("Fallback routed requested_model=%s actual_model=%s provider=%s",
-                            request.model, candidate["name"], candidate["provider"])
-            return generator, reservation_id
-        except HTTPException as e:
-            await release_budget(team["api_key"], reservation_id)
-            provider_failures += 1
-            logger.warning("Provider attempt failed model=%s provider=%s status=%s",
-                           candidate["name"], candidate["provider"], e.status_code)
+                try:
+                    reservation = await reserve_budget(team["api_key"], team, provider_request)
+                except ValueError as e:
+                    logger.warning("Budget reservation denied model=%s: %s", candidate["name"], e)
+                    budget_failures += 1
+                    attempt_span.set_attribute("outcome", "budget_blocked")
+                    metrics.provider_requests_total.labels(
+                        provider=candidate["provider"], model=candidate["name"], status="budget_blocked"
+                    ).inc()
+                    if request.allow_fallback and not fallback_computed:
+                        candidates.extend(build_fallback_candidates(
+                            request.model, allowed_models, candidate["provider"], request.allow_tier_downgrade
+                        ))
+                        fallback_computed = True
+                    continue
 
-            if not is_retryable_status(e.status_code):
-                raise
-            if not request.allow_fallback:
-                raise
-            if not fallback_computed:
-                candidates.extend(build_fallback_candidates(
-                    request.model, allowed_models, candidate["provider"], request.allow_tier_downgrade
-                ))
-                fallback_computed = True
-        except (httpx.TimeoutException, httpx.ConnectError) as e:
-            await release_budget(team["api_key"], reservation_id)
-            provider_failures += 1
-            logger.warning("Provider attempt connection error model=%s provider=%s: %s",
-                           candidate["name"], candidate["provider"], e)
+                reservation_id = reservation["reservation_id"]
+                attempt_start = time.monotonic()
 
-            if not request.allow_fallback:
-                raise HTTPException(status_code=503, detail=f"Upstream connection error: {e}") from e
-            if not fallback_computed:
-                candidates.extend(build_fallback_candidates(
-                    request.model, allowed_models, candidate["provider"], request.allow_tier_downgrade
-                ))
-                fallback_computed = True
-        except Exception:
-            await release_budget(team["api_key"], reservation_id)
-            logger.error("Unexpected error during provider attempt model=%s provider=%s",
-                        candidate["name"], candidate["provider"], exc_info=True)
-            raise
+                try:
+                    generator = await _start_attempt(provider, provider_request)
+                    attempt_latency = time.monotonic() - attempt_start
+                    attempt_span.set_attribute("outcome", "success")
+                    metrics.provider_requests_total.labels(
+                        provider=candidate["provider"], model=candidate["name"], status="success"
+                    ).inc()
+                    metrics.provider_latency_seconds.labels(
+                        provider=candidate["provider"], model=candidate["name"], status="success"
+                    ).observe(attempt_latency)
+                    if candidate["name"] != request.model:
+                        logger.info("Fallback routed requested_model=%s actual_model=%s provider=%s",
+                                    request.model, candidate["name"], candidate["provider"])
+                    return generator, reservation_id
+                except HTTPException as e:
+                    attempt_latency = time.monotonic() - attempt_start
+                    await release_budget(team["api_key"], reservation_id)
+                    provider_failures += 1
+                    logger.warning("Provider attempt failed model=%s provider=%s status=%s",
+                                   candidate["name"], candidate["provider"], e.status_code)
 
-    if provider_failures == 0 and budget_failures > 0:
-        raise ValueError("Budget limit exceeded")
-    raise NoProviderAvailableError(f"No available provider could serve model '{request.model}'")
+                    outcome = "retryable_error" if is_retryable_status(e.status_code) else "non_retryable_error"
+                    attempt_span.set_attribute("outcome", outcome)
+                    metrics.provider_requests_total.labels(
+                        provider=candidate["provider"], model=candidate["name"], status=outcome
+                    ).inc()
+                    metrics.provider_latency_seconds.labels(
+                        provider=candidate["provider"], model=candidate["name"], status=outcome
+                    ).observe(attempt_latency)
+
+                    if not is_retryable_status(e.status_code):
+                        raise
+                    if not request.allow_fallback:
+                        raise
+                    if not fallback_computed:
+                        candidates.extend(build_fallback_candidates(
+                            request.model, allowed_models, candidate["provider"], request.allow_tier_downgrade
+                        ))
+                        fallback_computed = True
+                except (httpx.TimeoutException, httpx.ConnectError) as e:
+                    attempt_latency = time.monotonic() - attempt_start
+                    await release_budget(team["api_key"], reservation_id)
+                    provider_failures += 1
+                    logger.warning("Provider attempt connection error model=%s provider=%s: %s",
+                                   candidate["name"], candidate["provider"], e)
+
+                    attempt_span.set_attribute("outcome", "retryable_error")
+                    metrics.provider_requests_total.labels(
+                        provider=candidate["provider"], model=candidate["name"], status="retryable_error"
+                    ).inc()
+                    metrics.provider_latency_seconds.labels(
+                        provider=candidate["provider"], model=candidate["name"], status="retryable_error"
+                    ).observe(attempt_latency)
+
+                    if not request.allow_fallback:
+                        raise HTTPException(status_code=503, detail=f"Upstream connection error: {e}") from e
+                    if not fallback_computed:
+                        candidates.extend(build_fallback_candidates(
+                            request.model, allowed_models, candidate["provider"], request.allow_tier_downgrade
+                        ))
+                        fallback_computed = True
+                except Exception:
+                    await release_budget(team["api_key"], reservation_id)
+                    logger.error("Unexpected error during provider attempt model=%s provider=%s",
+                                candidate["name"], candidate["provider"], exc_info=True)
+                    attempt_span.set_attribute("outcome", "non_retryable_error")
+                    metrics.provider_requests_total.labels(
+                        provider=candidate["provider"], model=candidate["name"], status="non_retryable_error"
+                    ).inc()
+                    raise
+
+        if provider_failures == 0 and budget_failures > 0:
+            raise ValueError("Budget limit exceeded")
+        raise NoProviderAvailableError(f"No available provider could serve model '{request.model}'")

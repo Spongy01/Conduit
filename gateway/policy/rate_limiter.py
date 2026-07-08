@@ -4,6 +4,8 @@ read-modify-write race between concurrent requests for the same team."""
 import logging
 import time
 from gateway.core.redis_client import redis_client
+from gateway.core import metrics
+from gateway.core.tracer import tracer
 
 logger = logging.getLogger(__name__)
 
@@ -33,25 +35,34 @@ return 0
 end
 """
 
-async def check_rate_limit(team_id: str, capacity: int, fill_rate: float) -> bool:
+async def check_rate_limit(team_id: str, capacity: float, fill_rate: float, model: str) -> bool:
     """Attempts to consume one token from the team's bucket. Returns True
     if the request is allowed, False if the bucket is empty (caller should
-    respond 429)."""
-    key = f"ratelimit:team:{team_id}"
-    current_time = time.time()
-    
-    result = await redis_client.get_client().eval(
-        LUA_SCRIPT,
-        1,
-        key,
-        current_time,
-        capacity,
-        fill_rate,
-    )
+    respond 429). `model` is only used to label a rejection metric."""
+    with tracer.start_as_current_span("conduit.rate_limit") as span:
+        span.set_attribute("team_id", team_id)
 
-    logger.debug(
-        "Rate limit check team_id=%s capacity=%s fill_rate=%s lua_result=%s",
-        team_id, capacity, fill_rate, result,
-    )
+        key = f"ratelimit:team:{team_id}"
+        current_time = time.time()
 
-    return result == 1
+        result = await redis_client.get_client().eval(
+            LUA_SCRIPT,
+            1,
+            key,
+            current_time,
+            capacity,
+            fill_rate,
+        )
+
+        allowed = result == 1
+        span.set_attribute("allowed", allowed)
+
+        logger.debug(
+            "Rate limit check team_id=%s capacity=%s fill_rate=%s lua_result=%s",
+            team_id, capacity, fill_rate, result,
+        )
+
+        if not allowed:
+            metrics.ratelimit_rejections_total.labels(team_id=team_id, model=model).inc()
+
+        return allowed
