@@ -149,3 +149,25 @@ async def test_model_access_emits_span_with_attributes(span_exporter):
     assert spans[0].attributes["allowed"] is True
     assert spans[1].attributes["model_requested"] == "obs-denied-model"
     assert spans[1].attributes["allowed"] is False
+
+
+async def test_authenticate_emits_span_with_team_id(db_conn, db_and_redis, span_exporter):
+    from gateway.auth.authenticate import authenticate
+
+    await db_conn.execute(
+        "INSERT INTO models (name, provider, cost_per_input_token, cost_per_output_token, tier) "
+        "VALUES ($1, $2, $3, $4, $5)",
+        "obs-auth-model", "openai", 0.001, 0.001, 1,
+    )
+    await db_conn.execute(
+        "INSERT INTO teams (api_key, team_id, team_name, allowed_models, rate_limit, budget_limit, budget_period) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        "sk-obs-auth-1", "team-obs-auth-1", "Obs Auth Team", ["obs-auth-model"], 100, 50.0, "monthly",
+    )
+
+    team = await authenticate(authorization="Bearer sk-obs-auth-1")
+    assert team["team_id"] == "team-obs-auth-1"
+
+    spans = [s for s in span_exporter.get_finished_spans() if s.name == "conduit.auth"]
+    assert len(spans) == 1
+    assert spans[0].attributes["team_id"] == "team-obs-auth-1"
