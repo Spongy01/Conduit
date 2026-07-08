@@ -244,3 +244,144 @@ async def test_router_records_fallback_event_and_attempt_spans(db_conn, db_and_r
     assert is_fallback_values == [False, True]
     attempt_numbers = sorted(s.attributes["attempt_number"] for s in attempt_spans)
     assert attempt_numbers == [1, 2]
+
+
+import asyncio
+
+import pytest
+from fastapi import FastAPI, Request
+
+from gateway.core.providers import PROVIDERS
+from tests.test_provider_usage import _run_app, _stop_app
+from tests.test_chat_budget_e2e import (
+    app_client, openai_dummy_url, MODEL_PAYLOAD,
+    _seed_model as _budget_seed_model, _seed_team as _budget_seed_team, _post_chat,
+)
+
+
+def _slow_openai_app(delay: float) -> FastAPI:
+    app = FastAPI()
+
+    @app.post("/v1/chat/completions")
+    async def _slow(request: Request):
+        body = await request.json()
+        await asyncio.sleep(delay)
+        return {
+            "id": "chatcmpl-slow",
+            "object": "chat.completion",
+            "model": body.get("model", "dummy-model"),
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "slow response"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10},
+        }
+
+    return app
+
+
+async def test_inflight_requests_rises_during_request_and_falls_after(db_conn, app_client):
+    server, task, url = await _run_app(_slow_openai_app(delay=0.3))
+    original_base_url = PROVIDERS["openai"]._base_url
+    PROVIDERS["openai"]._base_url = url
+    try:
+        model_name = await _budget_seed_model(db_conn, name="obs-slow-model")
+        api_key = await _budget_seed_team(db_conn, model_name, budget_limit=10.0)
+        team_id = f"team-{api_key}"
+
+        before = _counter_value(metrics.inflight_requests, team_id=team_id, provider="openai", model=model_name)
+
+        request_task = asyncio.create_task(_post_chat(app_client, api_key, model_name))
+        await asyncio.sleep(0.1)  # let the request reach the slow provider call
+
+        during = _counter_value(metrics.inflight_requests, team_id=team_id, provider="openai", model=model_name)
+        assert during == before + 1
+
+        response = await request_task
+        assert response.status_code == 200
+
+        after = _counter_value(metrics.inflight_requests, team_id=team_id, provider="openai", model=model_name)
+        assert after == before
+    finally:
+        PROVIDERS["openai"]._base_url = original_base_url
+        await _stop_app(server, task)
+
+
+async def test_successful_request_records_requests_total_and_duration(db_conn, app_client, openai_dummy_url):
+    model_name = await _budget_seed_model(db_conn, name="obs-success-model")
+    api_key = await _budget_seed_team(db_conn, model_name, budget_limit=10.0)
+    team_id = f"team-{api_key}"
+
+    requests_before = _counter_value(
+        metrics.requests_total, team_id=team_id, provider="openai", model=model_name, status="success"
+    )
+    duration_count_before = _histogram_count(
+        metrics.request_duration_seconds, team_id=team_id, provider="openai", model=model_name, status="success"
+    )
+
+    response = await _post_chat(app_client, api_key, model_name)
+    assert response.status_code == 200
+
+    assert _counter_value(
+        metrics.requests_total, team_id=team_id, provider="openai", model=model_name, status="success"
+    ) == requests_before + 1
+    assert _histogram_count(
+        metrics.request_duration_seconds, team_id=team_id, provider="openai", model=model_name, status="success"
+    ) == duration_count_before + 1
+
+
+async def test_rate_limited_request_records_http_429_status(db_conn, app_client, openai_dummy_url):
+    model_name = await _budget_seed_model(db_conn, name="obs-429-model")
+    api_key = await _budget_seed_team(db_conn, model_name, budget_limit=10.0, rate_limit=1)
+    team_id = f"team-{api_key}"
+
+    # The rate limiter's Lua bucket checks `new_tokens > 0`, not `>= 1`, so
+    # any nonzero elapsed time grants a full token off a tiny fractional
+    # refill — a rate_limit=1 bucket actually allows 2 requests through
+    # before the deficit is deep enough (and the fill rate slow enough) to
+    # reliably block. Pre-existing behavior, not something to fix here.
+    await _post_chat(app_client, api_key, model_name)
+    await _post_chat(app_client, api_key, model_name)
+    before = _counter_value(
+        metrics.requests_total, team_id=team_id, provider="openai", model=model_name, status="http_429"
+    )
+
+    response = await _post_chat(app_client, api_key, model_name)
+    assert response.status_code == 429
+
+    assert _counter_value(
+        metrics.requests_total, team_id=team_id, provider="openai", model=model_name, status="http_429"
+    ) == before + 1
+
+
+async def test_streaming_records_ttft_and_finishes_after_stream_completes(db_conn, app_client, openai_dummy_url):
+    model_name = await _budget_seed_model(db_conn, name="obs-ttft-model")
+    api_key = await _budget_seed_team(db_conn, model_name, budget_limit=10.0)
+    team_id = f"team-{api_key}"
+
+    ttft_count_before = _histogram_count(metrics.time_to_first_token_seconds, provider="openai", model=model_name)
+    requests_before = _counter_value(
+        metrics.requests_total, team_id=team_id, provider="openai", model=model_name, status="success"
+    )
+    inflight_before = _counter_value(metrics.inflight_requests, team_id=team_id, provider="openai", model=model_name)
+
+    response = await _post_chat(app_client, api_key, model_name, stream=True)
+    assert response.status_code == 200
+    assert response.text  # fully drained by httpx before returning
+
+    assert _histogram_count(metrics.time_to_first_token_seconds, provider="openai", model=model_name) == ttft_count_before + 1
+    assert _counter_value(
+        metrics.requests_total, team_id=team_id, provider="openai", model=model_name, status="success"
+    ) == requests_before + 1
+    assert _counter_value(metrics.inflight_requests, team_id=team_id, provider="openai", model=model_name) == inflight_before
+
+
+async def test_budget_utilization_gauge_set_after_settlement(db_conn, app_client, openai_dummy_url):
+    model_name = await _budget_seed_model(db_conn, name="obs-budget-model")
+    api_key = await _budget_seed_team(db_conn, model_name, budget_limit=10.0)
+    team_id = f"team-{api_key}"
+
+    response = await _post_chat(app_client, api_key, model_name)
+    assert response.status_code == 200
+
+    team_row = await db_conn.fetchrow("SELECT current_spend FROM teams WHERE api_key = $1", api_key)
+    expected_ratio = float(team_row["current_spend"]) / 10.0
+
+    assert _counter_value(metrics.budget_utilization, team_id=team_id) == pytest.approx(expected_ratio)
