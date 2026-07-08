@@ -119,3 +119,33 @@ async def test_ratelimit_rejection_increments_counter_and_emits_span(db_conn, db
     assert spans[0].attributes["team_id"] == team_id
     assert spans[0].attributes["allowed"] is True
     assert spans[1].attributes["allowed"] is False
+
+
+async def test_model_access_emits_span_with_attributes(span_exporter):
+    from fastapi import HTTPException
+
+    from gateway.core.schema import ChatCompletionRequest, Message
+    from gateway.policy.model_access import raise_if_model_not_allowed
+
+    team = {"allowed_models": [{"name": "obs-allowed-model", "provider": "openai"}]}
+    request = ChatCompletionRequest(
+        model="obs-allowed-model", messages=[Message(role="user", content="hi")]
+    )
+
+    raise_if_model_not_allowed(request, team)  # allowed: no raise
+
+    denied_request = ChatCompletionRequest(
+        model="obs-denied-model", messages=[Message(role="user", content="hi")]
+    )
+    try:
+        raise_if_model_not_allowed(denied_request, team)
+        assert False, "expected HTTPException"
+    except HTTPException as e:
+        assert e.status_code == 403
+
+    spans = [s for s in span_exporter.get_finished_spans() if s.name == "conduit.model_access"]
+    assert len(spans) == 2
+    assert spans[0].attributes["model_requested"] == "obs-allowed-model"
+    assert spans[0].attributes["allowed"] is True
+    assert spans[1].attributes["model_requested"] == "obs-denied-model"
+    assert spans[1].attributes["allowed"] is False
