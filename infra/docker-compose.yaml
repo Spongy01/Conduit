@@ -1,4 +1,22 @@
 services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgresql://conduit:postgres_conduit@postgres:5432/conduit
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+      - otel-collector
+
   postgres:
     image: postgres:16
     environment:

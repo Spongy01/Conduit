@@ -89,39 +89,30 @@ git clone https://github.com/your-username/conduit.git
 cd conduit
 ```
 
-Create `gateway/.env`:
+Copy `.env.example` to `.env` and fill in real provider keys:
 
-```env
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
-GEMINI_API_KEY=...
-OLLAMA_BASE_URL=http://localhost:11434   # optional, for local models
-
-DATABASE_URL=postgresql://conduit:postgres_conduit@localhost:5432/conduit
-ADMIN_API_KEY=your-secret-admin-key
+```bash
+cp .env.example .env
 ```
 
 `OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`, and `GEMINI_BASE_URL` are also read (defaulting to each provider's real API) — mainly useful for pointing at the dummy provider servers under `tests/dummy_providers` during local development.
 
-### 2. Start Postgres and Redis
+### 2. Start everything
 
 ```bash
-docker compose -f infra/docker-compose.yaml up -d   # Postgres, Redis, Prometheus, Grafana, otel-collector, Tempo
+docker compose -f infra/docker-compose.yaml up -d --build
+# Gateway (:8000), Postgres, Redis, Prometheus, Grafana, otel-collector, Tempo
 ```
 
-### 3. Run the server
+The `gateway` service builds from `infra/Dockerfile` and reads `.env` (via `env_file`); `DATABASE_URL`, `REDIS_HOST`, and `OTEL_EXPORTER_OTLP_ENDPOINT` are pinned in `infra/docker-compose.yaml` to the other compose services, so `.env` only needs to carry provider keys and `ADMIN_API_KEY`.
 
-There's no `requirements.txt` yet — install the direct dependencies:
+### 3. Run the server without Docker (optional)
+
+For hot-reload during development, run the gateway directly against the Postgres/Redis containers instead (exposed on `localhost:5432`/`localhost:6379`):
 
 ```bash
-pip install fastapi uvicorn asyncpg httpx pydantic "redis>=8" python-dotenv \
-  prometheus-client \
-  opentelemetry-api opentelemetry-sdk \
-  opentelemetry-exporter-otlp-proto-grpc \
-  opentelemetry-instrumentation-fastapi \
-  opentelemetry-instrumentation-asyncpg \
-  opentelemetry-instrumentation-redis \
-  opentelemetry-instrumentation-httpx
+pip install -r requirements.txt
+set -a; source .env; set +a
 uvicorn gateway.main:app --reload
 ```
 
@@ -169,17 +160,20 @@ All admin endpoints require the `X-Admin-Key` header.
 
 ## Running Tests
 
-The test suite is a black-box integration suite: it drives a running gateway instance over HTTP, so Postgres, Redis, the dummy provider servers, and the app itself all need to be up first.
+The test suite is a black-box integration suite: it drives a running gateway instance over HTTP, so Postgres, Redis, the dummy provider servers, and the app itself all need to be up first. The dummy providers run on the host and need to be reachable at `localhost:8001-8004`, so run the gateway on the host too (not the containerized `gateway` service) for this workflow.
 
 ```bash
-# 1. Test database + Redis
-docker compose -f infra/docker-compose.yaml up -d
+# 1. Postgres + Redis (skip the gateway/observability services)
+docker compose -f infra/docker-compose.yaml up -d postgres redis
 
 # 2. Dummy provider servers (stand in for OpenAI/Anthropic/Gemini/Ollama)
 python tests/dummy_providers/run_all.py &
 
 # 3. The gateway itself, pointed at the test env
-set -a; source .env.test; set +a
+DATABASE_URL=postgresql://conduit:postgres_conduit@localhost:5432/conduit \
+ADMIN_API_KEY=test-admin-key \
+OPENAI_BASE_URL=http://localhost:8001 ANTHROPIC_BASE_URL=http://localhost:8002 GEMINI_BASE_URL=http://localhost:8003 \
+OPENAI_API_KEY=dummy ANTHROPIC_API_KEY=dummy GEMINI_API_KEY=dummy \
 uvicorn gateway.main:app --port 8000 &
 
 # 4. Run the tests

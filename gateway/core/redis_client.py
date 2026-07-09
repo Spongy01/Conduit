@@ -1,3 +1,5 @@
+import os
+
 import redis.asyncio as redis
 
 #create a base object
@@ -65,4 +67,8 @@ class RedisClient:
         return await client.hget(key, field)
 
 
-redis_client = RedisClient()
+# when using compose, set REDIS_HOST=redis rather than localhost
+redis_client = RedisClient(
+    host=os.environ.get("REDIS_HOST", "localhost"),
+    port=int(os.environ.get("REDIS_PORT", 6379)),
+)
