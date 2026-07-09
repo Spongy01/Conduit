@@ -184,6 +184,28 @@ ADMIN_API_KEY=test-admin-key pytest
 
 ---
 
+## Compose Profiles
+
+`infra/docker-compose.yaml` has three opt-in profiles on top of the base stack (gateway, Postgres, Redis, Prometheus, Grafana, otel-collector, Tempo), for when you want dummy providers, seed data, or load testing without running anything on the host.
+
+```bash
+# Dummy OpenAI/Anthropic/Ollama servers on :8001/:8002/:8003 — the
+# .env.example defaults already point the gateway at these, so
+# `docker compose up` with the dummy profile works with no edits.
+docker compose -f infra/docker-compose.yaml --profile dummy up -d
+
+# One-shot job that seeds Postgres with the same models/teams as
+# tests/seed_db.py. Waits for Postgres's healthcheck, then exits.
+docker compose -f infra/docker-compose.yaml --profile seed up seed
+
+# Locust web UI on :8089, pointed at the gateway service.
+docker compose -f infra/docker-compose.yaml --profile locust up -d locust
+```
+
+Profiles combine with each other and with the base stack, e.g. `--profile dummy --profile seed --profile locust up -d` brings up everything at once for an end-to-end load test against dummy providers.
+
+---
+
 ## Roadmap
 
 - [ ] **Automatic budget period resets** — daily/monthly rollover of `current_spend` based on each team's `budget_period`

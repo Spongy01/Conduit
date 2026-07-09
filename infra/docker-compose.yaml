@@ -27,6 +27,11 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U conduit -d conduit"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7.4-alpine
@@ -73,5 +78,65 @@ services:
     volumes:
       - ./tempo-config.yml:/etc/tempo/config.yml
     command: ["-config.file=/etc/tempo/config.yml"]
+
+  dummy-openai:
+    build:
+      context: ..
+      dockerfile: infra/dummy-provider/Dockerfile
+    profiles: ["dummy"]
+    environment:
+      DUMMY_APP: tests.dummy_providers.openai_dummy:app
+      DUMMY_PORT: "8001"
+    ports:
+      - "8001:8001"
+
+  dummy-anthropic:
+    build:
+      context: ..
+      dockerfile: infra/dummy-provider/Dockerfile
+    profiles: ["dummy"]
+    environment:
+      DUMMY_APP: tests.dummy_providers.anthropic_dummy:app
+      DUMMY_PORT: "8002"
+    ports:
+      - "8002:8002"
+
+  dummy-ollama:
+    build:
+      context: ..
+      dockerfile: infra/dummy-provider/Dockerfile
+    profiles: ["dummy"]
+    environment:
+      DUMMY_APP: tests.dummy_providers.ollama_dummy:app
+      DUMMY_PORT: "8003"
+    ports:
+      - "8003:8003"
+
+  seed:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    profiles: ["seed"]
+    environment:
+      TEST_DATABASE_URL: postgresql://conduit:postgres_conduit@postgres:5432/conduit
+    volumes:
+      - ../tests/seed_db.py:/app/tests/seed_db.py:ro
+    command: ["python", "tests/seed_db.py"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  locust:
+    image: locustio/locust
+    profiles: ["locust"]
+    volumes:
+      - ../tests/loadtest:/mnt/locust
+    command: ["-f", "/mnt/locust/locustfile.py", "--host", "http://gateway:8000"]
+    ports:
+      - "8089:8089"
+    depends_on:
+      - gateway
+
 volumes:
   postgres_data:
