@@ -35,10 +35,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Opens the database pool and Redis connection on startup, configures
-    OpenTelemetry tracing (tracer provider, OTLP exporter, and
-    auto-instrumentation for FastAPI/asyncpg/redis/httpx), and closes
-    everything on shutdown, so every request handler can assume they're
+    """Opens the database pool and Redis connection on startup, and closes
+    everything (including the OTel tracer provider configured at import
+    time below) on shutdown, so every request handler can assume they're
     ready."""
     # Startup code: Initialize the database connection pool
     await db.connect()
@@ -46,22 +45,6 @@ async def lifespan(app: FastAPI):
     # Startup code: Initialize the Redis client
     redis_client.connect()
     logger.debug("Redis client initialized")
-
-    # Startup code: configure the OTel tracer provider and OTLP exporter,
-    # then auto-instrument every library the gateway talks to. Manual spans
-    # (gateway/core/tracer.py's `tracer`) were already obtained as a
-    # ProxyTracer before this runs, and resolve to this provider from here on.
-    resource = Resource.create({"service.name": os.environ.get("OTEL_SERVICE_NAME", "conduit-gateway")})
-    tracer_provider = TracerProvider(resource=resource)
-    otlp_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
-    tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint)))
-    trace.set_tracer_provider(tracer_provider)
-
-    FastAPIInstrumentor.instrument_app(app)
-    AsyncPGInstrumentor().instrument()
-    RedisInstrumentor().instrument()
-    HTTPXClientInstrumentor().instrument()
-    logger.debug("OpenTelemetry tracing configured otlp_endpoint=%s", otlp_endpoint)
 
     yield
 
@@ -77,6 +60,29 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+# Configure the OTel tracer provider and instrument the app *before* it is
+# ever invoked for any ASGI scope -- including "lifespan" itself. Starlette's
+# `Starlette.__call__` builds and caches `self.middleware_stack` on its very
+# first invocation, and that first invocation is the "lifespan" scope uvicorn
+# sends to trigger startup. Instrumenting from inside the `lifespan()`
+# context manager above runs too late: the (uninstrumented) stack has
+# already been built and cached by then, and that same stale stack is reused
+# for every subsequent HTTP request, so no root span is ever created and
+# every manual span ends up parentless. Doing it here, right after the app
+# is constructed, guarantees it happens first.
+resource = Resource.create({"service.name": os.environ.get("OTEL_SERVICE_NAME", "conduit-gateway")})
+tracer_provider = TracerProvider(resource=resource)
+otlp_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint)))
+trace.set_tracer_provider(tracer_provider)
+
+FastAPIInstrumentor.instrument_app(app)
+AsyncPGInstrumentor().instrument()
+RedisInstrumentor().instrument()
+HTTPXClientInstrumentor().instrument()
+logger.debug("OpenTelemetry tracing configured otlp_endpoint=%s", otlp_endpoint)
+
 app.include_router(chat_router, prefix="/api")    # public chat completion endpoints
 app.include_router(admin_router, prefix="/admin")  # admin-key-protected team/model management
 

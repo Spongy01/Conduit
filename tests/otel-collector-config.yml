@@ -1,0 +1,41 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+  tail_sampling:
+    decision_wait: 10s
+    policies:
+      - name: slow-requests
+        type: latency
+        latency:
+          threshold_ms: 2000
+      - name: errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      - name: probabilistic
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 5
+
+exporters:
+  otlp:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+    sending_queue:
+      num_consumers: 4
+      queue_size: 1000
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [tail_sampling]
+      exporters: [otlp]
