@@ -7,7 +7,7 @@ import asyncpg
 
 DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
-    "postgresql://conduit:postgres_conduit@localhost:5433/conduit",
+    "postgresql://conduit:postgres_conduit@localhost:5432/conduit",
 )
 
 MODELS = [

@@ -106,9 +106,7 @@ ADMIN_API_KEY=your-secret-admin-key
 ### 2. Start Postgres and Redis
 
 ```bash
-docker compose -f infra/docker-compose.yaml up -d   # Postgres
-# Redis: run your own instance, or reuse the one from the test compose file
-# (see "Running Tests" below) pointed at localhost:6379
+docker compose -f infra/docker-compose.yaml up -d   # Postgres, Redis, Prometheus, Grafana, otel-collector, Tempo
 ```
 
 ### 3. Run the server
@@ -175,7 +173,7 @@ The test suite is a black-box integration suite: it drives a running gateway ins
 
 ```bash
 # 1. Test database + Redis
-docker compose -f infra/docker-compose.test.yaml up -d
+docker compose -f infra/docker-compose.yaml up -d
 
 # 2. Dummy provider servers (stand in for OpenAI/Anthropic/Gemini/Ollama)
 python tests/dummy_providers/run_all.py &

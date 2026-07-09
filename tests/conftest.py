@@ -21,7 +21,7 @@ trace.set_tracer_provider(_test_tracer_provider)
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
-    "postgresql://conduit:postgres_conduit@localhost:5433/conduit",
+    "postgresql://conduit:postgres_conduit@localhost:5432/conduit",
 )
 TEST_APP_URL = os.environ.get("TEST_APP_URL", "http://localhost:8000")
 ADMIN_API_KEY = os.environ["ADMIN_API_KEY"]
