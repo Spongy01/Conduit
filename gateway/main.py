@@ -23,6 +23,7 @@ from gateway.core import metrics  # noqa: F401 -- importing registers every metr
                                    # registry at startup, so /metrics reports them all even before
                                    # the first request exercises the code path that increments them.
 from gateway.core.database import db
+from gateway.core.providers import PROVIDERS
 from gateway.core.redis_client import redis_client
 
 logging.basicConfig(
@@ -48,6 +49,11 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # Shutdown code: Close any shared httpx clients held by providers
+    for provider in PROVIDERS.values():
+        if hasattr(provider, "aclose"):
+            await provider.aclose()
+    logger.debug("Provider HTTP clients closed")
     # Shutdown code: Close the database connection pool
     await db.disconnect()
     logger.debug("Database connection pool closed")

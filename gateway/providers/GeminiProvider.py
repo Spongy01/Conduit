@@ -1,11 +1,13 @@
 from gateway.providers.BaseProvider import BaseProvider
 from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse, Usage
 from gateway.core.tokens import estimate_tokens
+from gateway.core.tracer import tracer
 from typing import AsyncGenerator
 import httpx
 import json
 import logging
 import os
+import sys
 from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
@@ -17,6 +19,11 @@ class GeminiProvider(BaseProvider):
         self.api_key = api_key
         _base = os.environ.get("GEMINI_BASE_URL", "http://localhost:8004")
         self.base_url = f"{_base}/v1beta/models"
+        self._client = httpx.AsyncClient(timeout=None)
+
+    async def aclose(self):
+        """Closes the shared connection pool. Called on app shutdown."""
+        await self._client.aclose()
 
     async def generate(self, request: ChatCompletionRequest) -> AsyncGenerator[ChatCompletionResponse, None]:
         """Translates a ChatCompletionRequest into a Gemini generateContent/
@@ -60,83 +67,86 @@ class GeminiProvider(BaseProvider):
 
         logger.debug("Calling Gemini API model=%s stream=%s", model, stream)
 
-        async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream("POST", url, headers=headers, json=payload) as response:
+        stream_cm = self._client.stream("POST", url, headers=headers, json=payload)
+        with tracer.start_as_current_span("conduit.gemini.httpx_connection"):
+            response = await stream_cm.__aenter__()
+        try:
+            if response.status_code != 200:
+                text = await response.aread()
+                logger.error("Gemini API error status=%s model=%s: %s", response.status_code, model, text)
+                raise HTTPException(status_code=response.status_code, detail=f"Gemini API error: {text}")
+            # =========================
+            # STREAMING MODE
+            # =========================
+            if stream:
+                first_chunk = True
+                async for line in response.aiter_lines():
 
-                if response.status_code != 200:
-                    text = await response.aread()
-                    logger.error("Gemini API error status=%s model=%s: %s", response.status_code, model, text)
-                    raise HTTPException(status_code=response.status_code, detail=f"Gemini API error: {text}")
-                # =========================
-                # STREAMING MODE
-                # =========================
-                if stream:
-                    first_chunk = True
-                    async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
 
-                        if not line.startswith("data:"):
-                            continue
+                    data = line[len("data:"):].strip()
 
-                        data = line[len("data:"):].strip()
+                    chunk = json.loads(data)
+                    candidates = chunk.get("candidates", [])
 
-                        chunk = json.loads(data)
-                        candidates = chunk.get("candidates", [])
+                    # Final chunk: no text, carries the actual usage totals.
+                    if chunk.get("usageMetadata") and (
+                        not candidates or candidates[0].get("finishReason")
+                    ):
+                        usage = chunk["usageMetadata"]
+                        yield ChatCompletionResponse(
+                            model=model,
+                            is_final=True,
+                            usage=Usage(
+                                prompt_tokens=usage["promptTokenCount"],
+                                completion_tokens=usage["candidatesTokenCount"],
+                                total_tokens=usage["totalTokenCount"],
+                            ),
+                        )
+                        continue
 
-                        # Final chunk: no text, carries the actual usage totals.
-                        if chunk.get("usageMetadata") and (
-                            not candidates or candidates[0].get("finishReason")
-                        ):
-                            usage = chunk["usageMetadata"]
+                    if not candidates:
+                        continue
+
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    for part in parts:
+                        text = part.get("text", "")
+                        if text:
+                            output_token_estimate = estimate_tokens(text)
                             yield ChatCompletionResponse(
                                 model=model,
-                                is_final=True,
+                                delta=text,
                                 usage=Usage(
-                                    prompt_tokens=usage["promptTokenCount"],
-                                    completion_tokens=usage["candidatesTokenCount"],
-                                    total_tokens=usage["totalTokenCount"],
+                                    prompt_tokens=input_token_estimate if first_chunk else 0,
+                                    completion_tokens=output_token_estimate,
+                                    total_tokens=(input_token_estimate if first_chunk else 0) + output_token_estimate,
                                 ),
                             )
-                            continue
+                            first_chunk = False
 
-                        if not candidates:
-                            continue
+            # =========================
+            # NON-STREAMING MODE
+            # =========================
+            else:
+                data = await response.aread()
+                full = json.loads(data)
 
-                        parts = candidates[0].get("content", {}).get("parts", [])
-                        for part in parts:
-                            text = part.get("text", "")
-                            if text:
-                                output_token_estimate = estimate_tokens(text)
-                                yield ChatCompletionResponse(
-                                    model=model,
-                                    delta=text,
-                                    usage=Usage(
-                                        prompt_tokens=input_token_estimate if first_chunk else 0,
-                                        completion_tokens=output_token_estimate,
-                                        total_tokens=(input_token_estimate if first_chunk else 0) + output_token_estimate,
-                                    ),
-                                )
-                                first_chunk = False
+                content = (
+                    full["candidates"][0]["content"]["parts"][0]["text"]
+                )
+                usage = full["usageMetadata"]
 
-                # =========================
-                # NON-STREAMING MODE
-                # =========================
-                else:
-                    data = await response.aread()
-                    full = json.loads(data)
-
-                    content = (
-                        full["candidates"][0]["content"]["parts"][0]["text"]
-                    )
-                    usage = full["usageMetadata"]
-
-                    logger.debug("Gemini API response received model=%s", model)
-                    yield ChatCompletionResponse(
-                        model=model,
-                        full_response=content,
-                        is_final=True,
-                        usage=Usage(
-                            prompt_tokens=usage["promptTokenCount"],
-                            completion_tokens=usage["candidatesTokenCount"],
-                            total_tokens=usage["totalTokenCount"],
-                        ),
-                    )
+                logger.debug("Gemini API response received model=%s", model)
+                yield ChatCompletionResponse(
+                    model=model,
+                    full_response=content,
+                    is_final=True,
+                    usage=Usage(
+                        prompt_tokens=usage["promptTokenCount"],
+                        completion_tokens=usage["candidatesTokenCount"],
+                        total_tokens=usage["totalTokenCount"],
+                    ),
+                )
+        finally:
+            await stream_cm.__aexit__(*sys.exc_info())

@@ -1,10 +1,12 @@
 from gateway.providers.BaseProvider import BaseProvider
 from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse, Usage
 from gateway.core.tokens import estimate_tokens
+from gateway.core.tracer import tracer
 from typing import AsyncGenerator
 import httpx
 import json
 import logging
+import sys
 from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
@@ -14,6 +16,11 @@ class OllamaProvider(BaseProvider):
 
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
+        self._client = httpx.AsyncClient(timeout=None)
+
+    async def aclose(self):
+        """Closes the shared connection pool. Called on app shutdown."""
+        await self._client.aclose()
 
     async def generate(self, request: ChatCompletionRequest) -> AsyncGenerator[ChatCompletionResponse, None]:
         """Translates a ChatCompletionRequest into an Ollama /api/chat call
@@ -43,71 +50,74 @@ class OllamaProvider(BaseProvider):
 
         logger.debug("Calling Ollama API model=%s stream=%s", model, stream)
 
-        async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream("POST", url, headers=headers, json=payload) as response:
+        stream_cm = self._client.stream("POST", url, headers=headers, json=payload)
+        with tracer.start_as_current_span("conduit.ollama.httpx_connection"):
+            response = await stream_cm.__aenter__()
+        try:
+            if response.status_code != 200:
+                text = await response.aread()
+                logger.error("Ollama API error status=%s model=%s: %s", response.status_code, model, text)
+                raise HTTPException(status_code=response.status_code, detail=f"Ollama API error: {text}")
+            # =========================
+            # STREAMING MODE
+            # =========================
+            if stream:
+                first_chunk = True
+                async for line in response.aiter_lines():
+                    if not line:
+                        continue
 
-                if response.status_code != 200:
-                    text = await response.aread()
-                    logger.error("Ollama API error status=%s model=%s: %s", response.status_code, model, text)
-                    raise HTTPException(status_code=response.status_code, detail=f"Ollama API error: {text}")
-                # =========================
-                # STREAMING MODE
-                # =========================
-                if stream:
-                    first_chunk = True
-                    async for line in response.aiter_lines():
-                        if not line:
-                            continue
+                    chunk = json.loads(line)
+                    content = chunk.get("message", {}).get("content", "")
 
-                        chunk = json.loads(line)
-                        content = chunk.get("message", {}).get("content", "")
+                    if content:
+                        output_token_estimate = estimate_tokens(content)
+                        yield ChatCompletionResponse(
+                            model=model,
+                            delta=content,
+                            usage=Usage(
+                                prompt_tokens=input_token_estimate if first_chunk else 0,
+                                completion_tokens=output_token_estimate,
+                                total_tokens=(input_token_estimate if first_chunk else 0) + output_token_estimate,
+                            ),
+                        )
+                        first_chunk = False
 
-                        if content:
-                            output_token_estimate = estimate_tokens(content)
-                            yield ChatCompletionResponse(
-                                model=model,
-                                delta=content,
-                                usage=Usage(
-                                    prompt_tokens=input_token_estimate if first_chunk else 0,
-                                    completion_tokens=output_token_estimate,
-                                    total_tokens=(input_token_estimate if first_chunk else 0) + output_token_estimate,
-                                ),
-                            )
-                            first_chunk = False
+                    if chunk.get("done"):
+                        prompt_eval_count = chunk.get("prompt_eval_count", input_token_estimate)
+                        eval_count = chunk.get("eval_count", 0)
+                        yield ChatCompletionResponse(
+                            model=model,
+                            is_final=True,
+                            usage=Usage(
+                                prompt_tokens=prompt_eval_count,
+                                completion_tokens=eval_count,
+                                total_tokens=prompt_eval_count + eval_count,
+                            ),
+                        )
+                        break
 
-                        if chunk.get("done"):
-                            prompt_eval_count = chunk.get("prompt_eval_count", input_token_estimate)
-                            eval_count = chunk.get("eval_count", 0)
-                            yield ChatCompletionResponse(
-                                model=model,
-                                is_final=True,
-                                usage=Usage(
-                                    prompt_tokens=prompt_eval_count,
-                                    completion_tokens=eval_count,
-                                    total_tokens=prompt_eval_count + eval_count,
-                                ),
-                            )
-                            break
+            # =========================
+            # NON-STREAMING MODE
+            # =========================
+            else:
+                data = await response.aread()
+                full = json.loads(data)
 
-                # =========================
-                # NON-STREAMING MODE
-                # =========================
-                else:
-                    data = await response.aread()
-                    full = json.loads(data)
+                content = full["message"]["content"]
+                prompt_eval_count = full.get("prompt_eval_count", input_token_estimate)
+                eval_count = full.get("eval_count", 0)
 
-                    content = full["message"]["content"]
-                    prompt_eval_count = full.get("prompt_eval_count", input_token_estimate)
-                    eval_count = full.get("eval_count", 0)
-
-                    logger.debug("Ollama API response received model=%s", model)
-                    yield ChatCompletionResponse(
-                        model=model,
-                        full_response=content,
-                        is_final=True,
-                        usage=Usage(
-                            prompt_tokens=prompt_eval_count,
-                            completion_tokens=eval_count,
-                            total_tokens=prompt_eval_count + eval_count,
-                        ),
-                    )
+                logger.debug("Ollama API response received model=%s", model)
+                yield ChatCompletionResponse(
+                    model=model,
+                    full_response=content,
+                    is_final=True,
+                    usage=Usage(
+                        prompt_tokens=prompt_eval_count,
+                        completion_tokens=eval_count,
+                        total_tokens=prompt_eval_count + eval_count,
+                    ),
+                )
+        finally:
+            await stream_cm.__aexit__(*sys.exc_info())
