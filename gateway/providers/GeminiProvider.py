@@ -19,11 +19,6 @@ class GeminiProvider(BaseProvider):
         self.api_key = api_key
         _base = os.environ.get("GEMINI_BASE_URL", "http://localhost:8004")
         self.base_url = f"{_base}/v1beta/models"
-        self._client = httpx.AsyncClient(timeout=None)
-
-    async def aclose(self):
-        """Closes the shared connection pool. Called on app shutdown."""
-        await self._client.aclose()
 
     async def generate(self, request: ChatCompletionRequest) -> AsyncGenerator[ChatCompletionResponse, None]:
         """Translates a ChatCompletionRequest into a Gemini generateContent/
@@ -67,7 +62,7 @@ class GeminiProvider(BaseProvider):
 
         logger.debug("Calling Gemini API model=%s stream=%s", model, stream)
 
-        stream_cm = self._client.stream("POST", url, headers=headers, json=payload)
+        stream_cm = self._get_client().stream("POST", url, headers=headers, json=payload)
         with tracer.start_as_current_span("conduit.gemini.httpx_connection"):
             response = await stream_cm.__aenter__()
         try:

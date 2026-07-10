@@ -18,11 +18,6 @@ class OpenAIProvider(BaseProvider):
     def __init__(self, api_key: str):
         self.api_key = api_key
         self._base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com")
-        self._client = httpx.AsyncClient(timeout=None)
-
-    async def aclose(self):
-        """Closes the shared connection pool. Called on app shutdown."""
-        await self._client.aclose()
 
     async def generate(self, request: ChatCompletionRequest) -> AsyncGenerator[ChatCompletionResponse, None]:
         """
@@ -59,7 +54,7 @@ class OpenAIProvider(BaseProvider):
 
         logger.debug("Calling OpenAI API model=%s stream=%s", model, stream)
 
-        stream_cm = self._client.stream(
+        stream_cm = self._get_client().stream(
             "POST",
             f"{self._base_url}/v1/chat/completions",
             headers=headers,

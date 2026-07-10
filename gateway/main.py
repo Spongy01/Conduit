@@ -51,8 +51,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown code: Close any shared httpx clients held by providers
     for provider in PROVIDERS.values():
-        if hasattr(provider, "aclose"):
-            await provider.aclose()
+        await provider.aclose()
     logger.debug("Provider HTTP clients closed")
     # Shutdown code: Close the database connection pool
     await db.disconnect()

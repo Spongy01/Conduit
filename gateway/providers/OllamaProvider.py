@@ -16,11 +16,6 @@ class OllamaProvider(BaseProvider):
 
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
-        self._client = httpx.AsyncClient(timeout=None)
-
-    async def aclose(self):
-        """Closes the shared connection pool. Called on app shutdown."""
-        await self._client.aclose()
 
     async def generate(self, request: ChatCompletionRequest) -> AsyncGenerator[ChatCompletionResponse, None]:
         """Translates a ChatCompletionRequest into an Ollama /api/chat call
@@ -50,7 +45,7 @@ class OllamaProvider(BaseProvider):
 
         logger.debug("Calling Ollama API model=%s stream=%s", model, stream)
 
-        stream_cm = self._client.stream("POST", url, headers=headers, json=payload)
+        stream_cm = self._get_client().stream("POST", url, headers=headers, json=payload)
         with tracer.start_as_current_span("conduit.ollama.httpx_connection"):
             response = await stream_cm.__aenter__()
         try:
