@@ -227,7 +227,7 @@ async def test_router_records_provider_success_metrics(db_conn, db_and_redis, op
         metrics.provider_requests_total, provider="openai", model="obs-router-success", status="success"
     )
     latency_count_before = _histogram_count(
-        metrics.provider_latency_seconds, provider="openai", model="obs-router-success", status="success"
+        metrics.provider_latency_seconds, provider="openai", model="obs-router-success", status="success", stream="false"
     )
 
     generator, reservation_id = await route_request(_fb_request("obs-router-success"), team)
@@ -237,7 +237,7 @@ async def test_router_records_provider_success_metrics(db_conn, db_and_redis, op
         metrics.provider_requests_total, provider="openai", model="obs-router-success", status="success"
     ) == requests_before + 1
     assert _histogram_count(
-        metrics.provider_latency_seconds, provider="openai", model="obs-router-success", status="success"
+        metrics.provider_latency_seconds, provider="openai", model="obs-router-success", status="success", stream="false"
     ) == latency_count_before + 1
 
 
@@ -340,7 +340,8 @@ async def test_successful_request_records_requests_total_and_duration(db_conn, a
         metrics.requests_total, team_id=team_id, provider="openai", model=model_name, status="success"
     )
     duration_count_before = _histogram_count(
-        metrics.request_duration_seconds, team_id=team_id, provider="openai", model=model_name, status="success"
+        metrics.request_duration_seconds, team_id=team_id, provider="openai", model=model_name, status="success",
+        stream="false",
     )
 
     response = await _post_chat(app_client, api_key, model_name)
@@ -350,7 +351,8 @@ async def test_successful_request_records_requests_total_and_duration(db_conn, a
         metrics.requests_total, team_id=team_id, provider="openai", model=model_name, status="success"
     ) == requests_before + 1
     assert _histogram_count(
-        metrics.request_duration_seconds, team_id=team_id, provider="openai", model=model_name, status="success"
+        metrics.request_duration_seconds, team_id=team_id, provider="openai", model=model_name, status="success",
+        stream="false",
     ) == duration_count_before + 1
 
 

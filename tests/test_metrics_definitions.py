@@ -36,11 +36,11 @@ def test_gauges_have_correct_type_and_labels():
 
 def test_histograms_have_correct_type_labels_and_buckets():
     assert isinstance(metrics.request_duration_seconds, Histogram)
-    assert sorted(metrics.request_duration_seconds._labelnames) == sorted(["team_id", "provider", "model", "status"])
+    assert sorted(metrics.request_duration_seconds._labelnames) == sorted(["team_id", "provider", "model", "status", "stream"])
     assert metrics.request_duration_seconds._upper_bounds[:-1] == REQUEST_BUCKETS
 
     assert isinstance(metrics.provider_latency_seconds, Histogram)
-    assert sorted(metrics.provider_latency_seconds._labelnames) == sorted(["provider", "model", "status"])
+    assert sorted(metrics.provider_latency_seconds._labelnames) == sorted(["provider", "model", "status", "stream"])
     assert metrics.provider_latency_seconds._upper_bounds[:-1] == REQUEST_BUCKETS
 
     assert isinstance(metrics.time_to_first_token_seconds, Histogram)

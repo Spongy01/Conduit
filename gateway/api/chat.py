@@ -106,7 +106,7 @@ async def _stream_with_metrics(generator, team, reservation_id, requested_model,
     finally:
         duration = time.monotonic() - start_time
         metrics.inflight_requests.labels(**metric_labels).dec()
-        metrics.request_duration_seconds.labels(status=status, **metric_labels).observe(duration)
+        metrics.request_duration_seconds.labels(status=status, stream="true", **metric_labels).observe(duration)
         metrics.requests_total.labels(status=status, **metric_labels).inc()
 
 
@@ -220,5 +220,7 @@ async def chat_completion(request: ChatCompletionRequest,
         if not streaming_started:
             duration = time.monotonic() - start_time
             metrics.inflight_requests.labels(**metric_labels).dec()
-            metrics.request_duration_seconds.labels(status=status, **metric_labels).observe(duration)
+            metrics.request_duration_seconds.labels(
+                status=status, stream=str(bool(stream)).lower(), **metric_labels
+            ).observe(duration)
             metrics.requests_total.labels(status=status, **metric_labels).inc()

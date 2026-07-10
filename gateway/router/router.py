@@ -190,7 +190,8 @@ async def route_request(request: ChatCompletionRequest, team: dict) -> tuple[Asy
                         provider=candidate["provider"], model=candidate["name"], status="success"
                     ).inc()
                     metrics.provider_latency_seconds.labels(
-                        provider=candidate["provider"], model=candidate["name"], status="success"
+                        provider=candidate["provider"], model=candidate["name"], status="success",
+                        stream=str(bool(request.stream)).lower(),
                     ).observe(attempt_latency)
                     if candidate["name"] != request.model:
                         logger.info("Fallback routed requested_model=%s actual_model=%s provider=%s",
@@ -209,7 +210,8 @@ async def route_request(request: ChatCompletionRequest, team: dict) -> tuple[Asy
                         provider=candidate["provider"], model=candidate["name"], status=outcome
                     ).inc()
                     metrics.provider_latency_seconds.labels(
-                        provider=candidate["provider"], model=candidate["name"], status=outcome
+                        provider=candidate["provider"], model=candidate["name"], status=outcome,
+                        stream=str(bool(request.stream)).lower(),
                     ).observe(attempt_latency)
 
                     if not is_retryable_status(e.status_code):
@@ -233,7 +235,8 @@ async def route_request(request: ChatCompletionRequest, team: dict) -> tuple[Asy
                         provider=candidate["provider"], model=candidate["name"], status="retryable_error"
                     ).inc()
                     metrics.provider_latency_seconds.labels(
-                        provider=candidate["provider"], model=candidate["name"], status="retryable_error"
+                        provider=candidate["provider"], model=candidate["name"], status="retryable_error",
+                        stream=str(bool(request.stream)).lower(),
                     ).observe(attempt_latency)
 
                     if not request.allow_fallback:

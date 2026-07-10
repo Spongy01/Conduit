@@ -40,25 +40,25 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.50, sum(rate(request_duration_seconds_bucket[5m])) by (le))",
-          "legendFormat": "p50"
+          "expr": "histogram_quantile(0.50, sum(rate(request_duration_seconds_bucket[5m])) by (le, stream))",
+          "legendFormat": "{{stream}} p50"
         },
         {
           "refId": "B",
-          "expr": "histogram_quantile(0.95, sum(rate(request_duration_seconds_bucket[5m])) by (le))",
-          "legendFormat": "p95"
+          "expr": "histogram_quantile(0.95, sum(rate(request_duration_seconds_bucket[5m])) by (le, stream))",
+          "legendFormat": "{{stream}} p95"
         },
         {
           "refId": "C",
-          "expr": "histogram_quantile(0.99, sum(rate(request_duration_seconds_bucket[5m])) by (le))",
-          "legendFormat": "p99"
+          "expr": "histogram_quantile(0.99, sum(rate(request_duration_seconds_bucket[5m])) by (le, stream))",
+          "legendFormat": "{{stream}} p99"
         }
       ]
     },
     {
       "id": 2,
       "title": "Latency by provider",
-      "description": "P95 latency per provider — shows which provider is slowest.",
+      "description": "P95/P99 latency per provider, split by streaming vs non-streaming — shows which provider is slowest.",
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
@@ -70,15 +70,20 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum(rate(provider_latency_seconds_bucket[5m])) by (le, provider))",
-          "legendFormat": "{{provider}} p95"
+          "expr": "histogram_quantile(0.95, sum(rate(provider_latency_seconds_bucket[5m])) by (le, provider, stream))",
+          "legendFormat": "{{provider}} {{stream}} p95"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.99, sum(rate(provider_latency_seconds_bucket[5m])) by (le, provider, stream))",
+          "legendFormat": "{{provider}} {{stream}} p99"
         }
       ]
     },
     {
       "id": 3,
       "title": "Time to first token",
-      "description": "Streaming responsiveness: p50 and p95 time to first chunk.",
+      "description": "Streaming responsiveness: p50, p95, p99 time to first chunk.",
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
@@ -97,6 +102,11 @@
           "refId": "B",
           "expr": "histogram_quantile(0.95, sum(rate(time_to_first_token_seconds_bucket[5m])) by (le))",
           "legendFormat": "p95"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum(rate(time_to_first_token_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p99"
         }
       ]
     },
@@ -135,7 +145,7 @@
     {
       "id": 5,
       "title": "Gateway overhead",
-      "description": "P95 total latency minus P95 provider latency — how much overhead Conduit itself adds.",
+      "description": "Total latency minus provider latency at P95 and P99 — how much overhead Conduit itself adds.",
       "type": "stat",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "x": 8, "y": 16, "w": 8, "h": 6 },
@@ -158,6 +168,13 @@
         {
           "refId": "A",
           "expr": "histogram_quantile(0.95, sum(rate(request_duration_seconds_bucket[5m])) by (le)) - histogram_quantile(0.95, sum(rate(provider_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.99, sum(rate(request_duration_seconds_bucket[5m])) by (le)) - histogram_quantile(0.99, sum(rate(provider_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p99",
           "instant": true
         }
       ]

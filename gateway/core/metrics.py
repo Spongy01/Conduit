@@ -66,14 +66,14 @@ budget_utilization = Gauge(
 request_duration_seconds = Histogram(
     "request_duration_seconds",
     "End-to-end chat completion request duration, from request start to final response.",
-    ["team_id", "provider", "model", "status"],
+    ["team_id", "provider", "model", "status", "stream"],
     buckets=REQUEST_DURATION_BUCKETS,
 )
 
 provider_latency_seconds = Histogram(
     "provider_latency_seconds",
     "Latency of a single upstream provider attempt.",
-    ["provider", "model", "status"],
+    ["provider", "model", "status", "stream"],
     buckets=REQUEST_DURATION_BUCKETS,
 )
 
