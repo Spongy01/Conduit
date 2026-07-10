@@ -19,7 +19,7 @@ from gateway.policy.budget import reserve_budget, release_budget
 
 logger = logging.getLogger(__name__)
 
-RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+RETRYABLE_STATUS_CODES = {404, 429, 500, 502, 503, 504}
 NON_RETRYABLE_STATUS_CODES = {400, 401, 403, 422}
 
 

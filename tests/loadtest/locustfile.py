@@ -22,7 +22,7 @@ PROMPTS = [
 ]
 
 
-def _post(client, key: str, model: str, stream: bool = True):
+def _post(client, key: str, model: str, stream: bool = True, allow_fallback: bool = False):
     client.post(
         CHAT_ENDPOINT,
         headers={"Authorization": f"Bearer {key}"},
@@ -30,6 +30,7 @@ def _post(client, key: str, model: str, stream: bool = True):
             "model": model,
             "messages": random.choice(PROMPTS),
             "stream": stream,
+            "allow_fallback": allow_fallback
         },
     )
 
@@ -82,7 +83,7 @@ class GammaUser(HttpUser):
 
     @task(3)
     def gemini_stream(self):
-        _post(self.client, "loadtest-key-gamma-003", "gemini-2.0-flash", stream=True)
+        _post(self.client, "loadtest-key-gamma-003", "gemini-2.0-flash", stream=True, allow_fallback=True)
 
     @task(1)
     def gpt4o_no_stream(self):
@@ -90,4 +91,4 @@ class GammaUser(HttpUser):
 
     @task(1)
     def gemini_no_stream(self):
-        _post(self.client, "loadtest-key-gamma-003", "gemini-2.0-flash", stream=False)
+        _post(self.client, "loadtest-key-gamma-003", "gemini-2.0-flash", stream=False, allow_fallback=True)

@@ -40,7 +40,7 @@ TEAMS = [
         "api_key": "loadtest-key-gamma-003",
         "team_id": "team-gamma",
         "team_name": "Gamma Load Test Team",
-        "allowed_models": ["gpt-4o", "claude-sonnet-4-6", "gemini-2.0-flash"],
+        "allowed_models": ["gpt-4o-mini","gpt-4o", "claude-sonnet-4-6", "gemini-2.0-flash"],
         "rate_limit": 1000,
         "budget_limit": 200.0,
         "budget_period": "monthly",

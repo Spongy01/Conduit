@@ -15,7 +15,7 @@ class GeminiProvider(BaseProvider):
 
     def __init__(self, api_key: str):
         self.api_key = api_key
-        _base = os.environ.get("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
+        _base = os.environ.get("GEMINI_BASE_URL", "http://localhost:8004")
         self.base_url = f"{_base}/v1beta/models"
 
     async def generate(self, request: ChatCompletionRequest) -> AsyncGenerator[ChatCompletionResponse, None]:
