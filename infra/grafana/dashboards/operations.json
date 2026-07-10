@@ -53,10 +53,10 @@
     {
       "id": 2,
       "title": "Error rate %",
-      "description": "Share of requests with a non-success status over the last minute.",
+      "description": "Share of requests that failed for a reason other than rate limiting, over the last minute.",
       "type": "stat",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "x": 0, "y": 8, "w": 6, "h": 8 },
+      "gridPos": { "x": 0, "y": 8, "w": 6, "h": 4 },
       "fieldConfig": {
         "defaults": {
           "unit": "percent",
@@ -76,7 +76,39 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(requests_total{status!=\"success\"}[1m])) / sum(rate(requests_total[1m])) * 100",
+          "expr": "sum(rate(requests_total{status!=\"success\", status!=\"http_429\"}[1m])) / sum(rate(requests_total[1m])) * 100",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Rate limit rejection %",
+      "description": "Share of requests rejected for exceeding the team's rate limit (HTTP 429), over the last minute.",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "x": 0, "y": 12, "w": 6, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 20 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(requests_total{status=\"http_429\"}[1m])) / sum(rate(requests_total[1m])) * 100",
           "instant": true
         }
       ]
