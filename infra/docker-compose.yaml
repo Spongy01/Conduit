@@ -12,6 +12,10 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     ports:
       - "8000:8000"
+    # Lets the container reach Ollama running on the host
+    # (OLLAMA_BASE_URL=http://host.docker.internal:11434).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - postgres
       - redis

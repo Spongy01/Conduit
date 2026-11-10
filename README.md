@@ -132,6 +132,19 @@ curl -X POST http://localhost:8000/admin/v1/teams \
   -d '{"api_key": "team-key-abc", "team_id": "team-1", "team_name": "Backend Team", "allowed_models": ["gpt-4o"], "rate_limit": 100, "budget_limit": 50.0, "budget_period": "monthly"}'
 ```
 
+#### Using local models (Ollama)
+
+Run `ollama serve` with models pulled (`ollama list`), set `OLLAMA_BASE_URL` in `.env` (see `.env.example`), then register each local model with provider `ollama` and zero cost:
+
+```bash
+curl -X POST http://localhost:8000/admin/v1/models \
+  -H "X-Admin-Key: your-secret-admin-key" \
+  -H "Content-Type: application/json" \
+  -d '{"model_name": "qwen3.5:4b", "provider": "ollama", "cost_per_input_token": 0.0, "cost_per_output_token": 0.0, "tier": 2}'
+```
+
+Then add the model name to a team's `allowed_models`. `max_tokens` is optional: omit it and local models run to completion. `tests/seed_db.py` seeds `qwen3.5:9b`, `qwen3.5:4b`, `gemma4:e4b` and a `team-delta` that can use them.
+
 ### 5. Make a request
 
 ```bash

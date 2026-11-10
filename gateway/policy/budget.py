@@ -33,7 +33,8 @@ async def reserve_budget(api_key: str, team: dict, request: ChatCompletionReques
 
     input_text = " ".join(m.content for m in request.messages)
     estimated_input_tokens = estimate_tokens(input_text)
-    estimated_output_tokens = request.max_tokens
+    # No explicit cap: assume the 200-token default paid providers apply.
+    estimated_output_tokens = request.max_tokens if request.max_tokens is not None else 200
 
     estimated_cost = (
         estimated_input_tokens * model_costs["cost_per_input_token"]

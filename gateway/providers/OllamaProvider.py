@@ -25,17 +25,20 @@ class OllamaProvider(BaseProvider):
         model = request.model
         stream = request.stream or False
         temperature = request.temperature if request.temperature is not None else 0.7
-        max_tokens = request.max_tokens if request.max_tokens is not None else 200
 
         payload = {
             "model": model,
-            "messages": [m.dict() for m in request.messages],
+            "messages": [m.model_dump() for m in request.messages],
             "stream": stream,
-            "options": {
-                "temperature": temperature,
-                "num_predict": max_tokens,
-            },
+            # Skip the hidden reasoning phase on thinking models (qwen3.5,
+            # gemma4): it can burn 1000+ tokens and 30+ seconds before any answer.
+            "think": False,
+            "options": {"temperature": temperature},
         }
+        # Only cap output when the caller asked for it; local models are free,
+        # so by default they run to completion.
+        if request.max_tokens is not None:
+            payload["options"]["num_predict"] = request.max_tokens
 
         input_text = " ".join(m.content for m in request.messages)
         input_token_estimate = estimate_tokens(input_text)

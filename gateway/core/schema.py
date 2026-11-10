@@ -18,7 +18,9 @@ class ChatCompletionRequest(BaseModel):
 
     temperature: float = 0.7
     stream: bool = False
-    max_tokens: int = 200
+    # None = no explicit cap. Local (Ollama) models then generate until they
+    # finish; paid providers fall back to their own 200-token default.
+    max_tokens: Optional[int] = None
 
     allow_fallback: Optional[bool] = False
     allow_tier_downgrade: Optional[bool] = False

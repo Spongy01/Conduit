@@ -15,6 +15,10 @@ MODELS = [
     {"name": "gpt-4o-mini", "provider": "openai", "cost_per_input_token": 0.00000015, "cost_per_output_token": 0.0000006, "tier": 2},
     {"name": "claude-sonnet-4-6", "provider": "anthropic", "cost_per_input_token": 0.000003, "cost_per_output_token": 0.000015, "tier": 4},
     {"name": "gemini-2.0-flash", "provider": "gemini", "cost_per_input_token": 0.0000001, "cost_per_output_token": 0.0000004, "tier": 2},
+    # Local models served by Ollama: free, so pricing is zero.
+    {"name": "qwen3.5:9b", "provider": "ollama", "cost_per_input_token": 0.0, "cost_per_output_token": 0.0, "tier": 3},
+    {"name": "qwen3.5:4b", "provider": "ollama", "cost_per_input_token": 0.0, "cost_per_output_token": 0.0, "tier": 2},
+    {"name": "gemma4:e4b", "provider": "ollama", "cost_per_input_token": 0.0, "cost_per_output_token": 0.0, "tier": 2},
 ]
 
 TEAMS = [
@@ -43,6 +47,15 @@ TEAMS = [
         "allowed_models": ["gpt-4o-mini","gpt-4o", "claude-sonnet-4-6", "gemini-2.0-flash"],
         "rate_limit": 1000,
         "budget_limit": 200.0,
+        "budget_period": "monthly",
+    },
+    {
+        "api_key": "loadtest-key-delta-004",
+        "team_id": "team-delta",
+        "team_name": "Delta Local Models Team",
+        "allowed_models": ["qwen3.5:9b", "qwen3.5:4b", "gemma4:e4b", "gpt-4o-mini"],
+        "rate_limit": 1000,
+        "budget_limit": 50.0,
         "budget_period": "monthly",
     },
 ]

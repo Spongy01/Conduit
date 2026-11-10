@@ -241,6 +241,41 @@ async def test_ollama_streaming_usage(ollama_server):
     assert text_chunks[0].usage.prompt_tokens > 0
 
 
+async def _captured_ollama_payload(max_tokens):
+    """Runs one non-streaming Ollama call against a stub that records the
+    JSON body it was sent, and returns that body."""
+    import httpx, json
+    seen = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.update(json.loads(req.content))
+        return httpx.Response(200, json={"message": {"content": "hi"}, "done": True,
+                                         "prompt_eval_count": 1, "eval_count": 1})
+
+    provider = OllamaProvider(base_url="http://ollama.test")
+    provider._get_client = lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    request = ChatCompletionRequest(
+        model="qwen3.5:4b", messages=[Message(role="user", content="hi")], max_tokens=max_tokens
+    )
+    await _collect(provider, request)
+    return seen
+
+
+async def test_ollama_omits_num_predict_when_max_tokens_unset():
+    body = await _captured_ollama_payload(max_tokens=None)
+    assert "num_predict" not in body["options"]
+
+
+async def test_ollama_disables_thinking():
+    body = await _captured_ollama_payload(max_tokens=None)
+    assert body["think"] is False
+
+
+async def test_ollama_forwards_explicit_max_tokens():
+    body = await _captured_ollama_payload(max_tokens=64)
+    assert body["options"]["num_predict"] == 64
+
+
 # ─── Streaming errors raise instead of yielding a fake chunk ──────────────
 
 async def test_openai_streaming_error_raises(failing_openai_server):
