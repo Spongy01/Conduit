@@ -180,27 +180,17 @@ All admin endpoints require the `X-Admin-Key` header.
 
 ## Running Tests
 
-The test suite is a black-box integration suite: it drives a running gateway instance over HTTP, so Postgres, Redis, the dummy provider servers, and the app itself all need to be up first. The dummy providers run on the host and need to be reachable at `localhost:8001-8004`, so run the gateway on the host too (not the containerized `gateway` service) for this workflow.
+The suite runs the gateway app in-process and spins up its own dummy provider servers, so the only thing it needs running is Postgres and Redis. It uses its **own database, `conduit_test`** (created automatically on first run), so it never touches the data in the `conduit` database your running gateway and demos use.
 
 ```bash
-# 1. Postgres + Redis (skip the gateway/observability services)
+# 1. Postgres + Redis (the rest of the stack can stay up or down)
 docker compose -f infra/docker-compose.yaml up -d postgres redis
 
-# 2. Dummy provider servers (stand in for OpenAI/Anthropic/Gemini/Ollama)
-python tests/dummy_providers/run_all.py &
-
-# 3. The gateway itself, pointed at the test env
-DATABASE_URL=postgresql://conduit:postgres_conduit@localhost:5432/conduit \
-ADMIN_API_KEY=test-admin-key \
-OPENAI_BASE_URL=http://localhost:8001 ANTHROPIC_BASE_URL=http://localhost:8002 GEMINI_BASE_URL=http://localhost:8003 \
-OPENAI_API_KEY=dummy ANTHROPIC_API_KEY=dummy GEMINI_API_KEY=dummy \
-uvicorn gateway.main:app --port 8000 &
-
-# 4. Run the tests
-ADMIN_API_KEY=test-admin-key pytest
+# 2. Run the tests
+ADMIN_API_KEY=test-admin-key OPENAI_API_KEY=dummy ANTHROPIC_API_KEY=dummy GEMINI_API_KEY=dummy pytest
 ```
 
-`tests/conftest.py` creates/truncates the `teams`, `models`, and `reservations` tables around each test. `tests/loadtest/locustfile.py` and `tests/seed_db.py` are available for load testing against a seeded instance.
+`tests/conftest.py` builds the schema from `infra/init.sql` and truncates `teams`, `models`, and `reservations` around each test. It refuses to run if `TEST_DATABASE_URL` points at a database whose name doesn't end in `_test`. `tests/clear_db.py` empties the test database; `tests/seed_db.py` seeds the demo database (`conduit`), and `tests/loadtest/locustfile.py` load-tests against it.
 
 ---
 
