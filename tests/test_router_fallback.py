@@ -78,7 +78,7 @@ def test_no_candidates_when_tier_exhausted_and_no_downgrade():
 
 
 def test_retryable_status_codes():
-    for code in (429, 500, 502, 503, 504):
+    for code in (404, 429, 500, 502, 503, 504):
         assert is_retryable_status(code) is True
 
 
@@ -88,7 +88,7 @@ def test_non_retryable_status_codes():
 
 
 def test_unlisted_status_code_is_not_retryable():
-    for code in (404, 405, 408, 409, 418):
+    for code in (405, 408, 409, 418):
         assert is_retryable_status(code) is False
 
 
