@@ -110,6 +110,19 @@ async def _stream_with_metrics(generator, team, reservation_id, requested_model,
         metrics.requests_total.labels(status=status, **metric_labels).inc()
 
 
+@router.get("/v1/models")
+async def list_models(team: dict = Depends(authenticate)):
+    """Lists the models the calling team's key may use, sorted by name.
+    Exposes only name/provider/tier -- no pricing or other team data.
+    Deliberately skips rate limiting and budget: it's a cheap read and
+    shouldn't consume the team's request quota."""
+    models = [
+        {"name": m["name"], "provider": m["provider"], "tier": m["tier"]}
+        for m in team.get("allowed_models", [])
+    ]
+    return {"models": sorted(models, key=lambda m: m["name"])}
+
+
 @router.post("/v1/chat/completion")
 async def chat_completion(request: ChatCompletionRequest,
                           team: dict = Depends(authenticate)):

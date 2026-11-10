@@ -154,6 +154,13 @@ curl -X POST http://localhost:8000/api/v1/chat/completion \
   -d '{"model": "gpt-4o", "messages": [{"role": "user", "content": "Hello!"}], "allow_fallback": true}'
 ```
 
+To see which models a team key may use:
+
+```bash
+curl http://localhost:8000/api/v1/models -H "Authorization: Bearer team-key-abc"
+# {"models": [{"name": "gpt-4o", "provider": "openai", "tier": 4}]}
+```
+
 ---
 
 ## Admin API Reference
