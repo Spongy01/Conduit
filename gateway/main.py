@@ -64,7 +64,14 @@ async def lifespan(app: FastAPI):
     logger.debug("Tracer provider shut down")
 
 
-app = FastAPI(lifespan=lifespan)
+_enable_docs = os.environ.get("ENABLE_DOCS", "true").lower() == "true"
+
+app = FastAPI(
+    lifespan=lifespan,
+    docs_url="/docs" if _enable_docs else None, 
+    redoc_url="/redoc" if _enable_docs else None,
+    openapi_url="/openapi.json" if _enable_docs else None
+    )
 
 # Configure the OTel tracer provider and instrument the app *before* it is
 # ever invoked for any ASGI scope -- including "lifespan" itself. Starlette's
