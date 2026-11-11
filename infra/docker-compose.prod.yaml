@@ -5,6 +5,8 @@ services:
     environment:
       ENABLE_DOCS: "false"
   grafana:
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD and pass --env-file .env}
     ports: !override
       - "127.0.0.1:3000:3000"
   postgres:
