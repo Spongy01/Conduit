@@ -1,0 +1,17 @@
+services:
+  gateway:
+    ports: !override
+      - "127.0.0.1:8000:8000"
+  grafana:
+    ports: !override
+      - "127.0.0.1:3000:3000"
+  postgres:
+    ports: !reset []
+  redis:
+    ports: !reset []
+  prometheus:
+    ports: !reset []
+  otel-collector:
+    ports: !reset []
+  tempo:
+    ports: !reset []
