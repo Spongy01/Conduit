@@ -147,3 +147,9 @@ async def get_team_config(api_key: str) -> dict | None:
     await cache.set_team_config(api_key, team)  # Update cache with enriched team config
 
     return team
+
+
+async def list_teams() -> list[dict]:
+    """Returns every team straight from Postgres (admin use; bypasses the
+    cache and keeps allowed_models as raw names)."""
+    return await db.list_teams()

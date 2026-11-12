@@ -38,3 +38,8 @@ async def get_model_config(model_name: str) -> dict | None:
     Returns the model configuration if it exists, otherwise returns None.
     """
     return await db.get_model(model_name)
+
+
+async def list_models() -> list[dict]:
+    """Returns every model in the catalog, sorted by name."""
+    return await db.list_models()

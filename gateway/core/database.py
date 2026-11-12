@@ -42,7 +42,7 @@ class Database:
                             api_key, team_id, team_name, allowed_models, rate_limit, budget_limit, budget_period
                         )
                 except asyncpg.UniqueViolationError:
-                    raise ValueError(f"API key {api_key} already exists")
+                    raise ValueError("API key already exists")
                 
             
     async def update_team(self, api_key: str, **fields):
@@ -54,7 +54,7 @@ class Database:
                 # Check if the team exists
                 team = await connection.fetchrow("SELECT * FROM teams WHERE api_key = $1", api_key)
                 if not team:
-                    raise ValueError(f"API key {api_key} does not exist")
+                    raise ValueError("API key does not exist")
 
                 # Prepare the update statement dynamically based on provided fields
                 set_clauses = []
@@ -63,9 +63,11 @@ class Database:
                     set_clauses.append(f"{field} = ${i}")
                     values.append(value)
 
-                if set_clauses:
-                    set_clause_str = ", ".join(set_clauses)
-                    
+                # Nothing to change (e.g. an admin-page Save with no edits).
+                if not set_clauses:
+                    return
+
+                set_clause_str = ", ".join(set_clauses)
                 await connection.execute(
                     f"UPDATE teams SET {set_clause_str} WHERE api_key = ${len(values) + 1}",
                     *values, api_key
@@ -80,10 +82,12 @@ class Database:
                 # Check if the team exists
                 team = await connection.fetchrow("SELECT * FROM teams WHERE api_key = $1", api_key)
                 if not team:
-                    raise ValueError(f"API key {api_key} does not exist")
+                    raise ValueError("API key does not exist")
 
-                # Delete the team from the database
-                
+                # Drop the team's reservations first: reservations.api_key is a foreign key
+                # with no cascade, so an in-flight or leaked reservation would otherwise make
+                # the delete fail and leave the revoked key working.
+                await connection.execute("DELETE FROM reservations WHERE api_key = $1", api_key)
                 await connection.execute("DELETE FROM teams WHERE api_key = $1", api_key)
     
     async def get_team(self, api_key: str):
@@ -95,7 +99,27 @@ class Database:
             return dict(team)
 
 
+    async def list_teams(self) -> list[dict]:
+        """Returns every team as a dict, sorted by team_name. allowed_models is
+        the raw list of model names (not enriched), and current_spend is a float."""
+        async with self.pool.acquire() as connection:
+            rows = await connection.fetch("SELECT * FROM teams ORDER BY team_name")
+        teams = []
+        for row in rows:
+            team = dict(row)
+            team["allowed_models"] = list(team["allowed_models"])
+            team["current_spend"] = float(team["current_spend"] or 0)
+            teams.append(team)
+        return teams
+
+
     ## Database Operations for Models
+    async def list_models(self) -> list[dict]:
+        """Returns every registered model as a dict, sorted by name."""
+        async with self.pool.acquire() as connection:
+            rows = await connection.fetch("SELECT * FROM models ORDER BY name")
+        return [dict(row) for row in rows]
+
     async def add_model(self, model_name: str, provider: str, cost_per_input_token: float, cost_per_output_token: float, tier: int = 1):
         """Inserts a new model row. Raises ValueError if model_name already exists."""
         async with self.pool.acquire() as connection:

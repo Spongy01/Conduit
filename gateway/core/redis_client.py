@@ -55,6 +55,12 @@ class RedisClient:
         if expire:
             await client.expire(key, expire)
 
+    async def delete(self, key: str):
+        """Removes a key (a no-op if it doesn't exist). Used to invalidate cached
+        team configs when a team is updated or revoked."""
+        client = self.get_client()
+        await client.delete(key)
+
     async def hgetall(self, key:str):
         """Returns all fields of a hash key as a dict (empty if missing)."""
         client = self.get_client()
