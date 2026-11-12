@@ -176,6 +176,18 @@ curl http://localhost:8000/api/v1/models -H "Authorization: Bearer team-key-abc"
 
 All admin endpoints require the `X-Admin-Key` header.
 
+### Request limits
+
+Oversized requests are rejected with HTTP `413` and a JSON `detail`, so a caller can't tie up the model backends with huge prompts. Configure via env vars (invalid or non-positive values fall back to the default with a warning):
+
+| Variable | Default | Limit |
+|----------|---------|-------|
+| `MAX_REQUEST_BYTES` | `1000000` | HTTP request body size (POST/PUT/PATCH, checked before auth) |
+| `MAX_PROMPT_CHARS` | `100000` | total characters of `content` across all chat messages |
+| `MAX_MESSAGES` | `200` | number of messages in a chat request |
+
+The prompt and message limits are checked after authentication and the model-access check, but before rate limiting and budget, so a rejected request costs nothing. `infra/docker-compose.prod.yaml` sets tighter values.
+
 ---
 
 ## Running Tests

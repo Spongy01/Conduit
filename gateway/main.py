@@ -25,6 +25,7 @@ from gateway.core import metrics  # noqa: F401 -- importing registers every metr
 from gateway.core.database import db
 from gateway.core.providers import PROVIDERS
 from gateway.core.redis_client import redis_client
+from gateway.policy.request_limits import RequestBodyLimitMiddleware
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -90,6 +91,9 @@ tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=
 trace.set_tracer_provider(tracer_provider)
 
 FastAPIInstrumentor.instrument_app(app)
+# Added after instrumentation so it sits outermost: oversized bodies are
+# rejected before any routing, auth or body parsing.
+app.add_middleware(RequestBodyLimitMiddleware)
 AsyncPGInstrumentor().instrument()
 RedisInstrumentor().instrument()
 HTTPXClientInstrumentor().instrument()
