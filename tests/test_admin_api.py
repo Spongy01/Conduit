@@ -198,3 +198,25 @@ async def test_create_model_default_tier(client, db_conn, admin_headers):
 
     row = await db_conn.fetchrow("SELECT * FROM models WHERE name = $1", "default-tier-model")
     assert row["tier"] == 1
+
+
+# ─── Admin authentication ────────────────────────────────────────────────────
+
+async def test_admin_wrong_key_returns_401(client):
+    r = await client.post("/admin/v1/teams", json=TEAM_PAYLOAD, headers={"X-Admin-Key": "wrong-key"})
+    assert r.status_code == 401
+
+
+async def test_admin_missing_key_is_rejected(client):
+    r = await client.post("/admin/v1/teams", json=TEAM_PAYLOAD)
+    assert r.status_code == 422  # required header absent; never reaches the handler
+
+
+async def test_admin_non_ascii_key_returns_401_not_500(client):
+    """secrets.compare_digest raises TypeError on non-ASCII *str* input, so
+    require_admin must encode both sides to bytes. Sent as raw bytes so the
+    non-ASCII value actually reaches the server."""
+    r = await client.post(
+        "/admin/v1/teams", json=TEAM_PAYLOAD, headers={"X-Admin-Key": "clé-é-密".encode("utf-8")}
+    )
+    assert r.status_code == 401
