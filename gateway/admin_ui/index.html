@@ -1,0 +1,583 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conduit Admin</title>
+<style nonce="__NONCE__">
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1c2430; --muted: #6a7585; --line: #dde1e7;
+    --accent: #2457d6; --accent-text: #ffffff; --danger: #b3261e; --ok: #1b7a3d; --warn-bg: #fff6df;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12161c; --panel: #1b212a; --text: #e6e9ee; --muted: #94a0b0; --line: #2d3541;
+      --accent: #6c93f5; --accent-text: #0e1522; --danger: #ff8a80; --ok: #6fd596; --warn-bg: #3a3320;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; }
+  .origin { color: var(--muted); font-size: 12px; }
+  .tabs { margin-left: auto; display: flex; gap: 4px; }
+  .tab { background: none; border: 1px solid transparent; border-radius: 6px; padding: 6px 12px; color: var(--text); cursor: pointer; font: inherit; }
+  .tab[aria-selected="true"] { background: var(--accent); color: var(--accent-text); }
+  main { padding: 16px 20px; }
+  .gate { max-width: 360px; margin: 12vh auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
+  .gate h2 { margin-top: 0; }
+  .panes { display: grid; grid-template-columns: 260px 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 720px) { .panes { grid-template-columns: 1fr; } }
+  .pane { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .list-item { display: flex; justify-content: space-between; gap: 8px; width: 100%; text-align: left; background: none; border: 0; border-radius: 6px; padding: 8px; color: var(--text); cursor: pointer; font: inherit; }
+  .list-item:hover { background: var(--bg); }
+  .list-item[aria-current="true"] { background: var(--bg); font-weight: 600; }
+  .tag { color: var(--muted); font-size: 12px; }
+  label { display: block; margin: 12px 0 4px; font-size: 12px; color: var(--muted); }
+  input[type=text], input[type=password], input[type=number], select { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .row > * { flex: 1 1 140px; }
+  .checks { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 4px 0; }
+  .checks label { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text); font-size: 14px; }
+  button.btn { background: var(--accent); color: var(--accent-text); border: 0; border-radius: 6px; padding: 8px 14px; cursor: pointer; font: inherit; }
+  button.btn.secondary { background: none; color: var(--text); border: 1px solid var(--line); }
+  button.btn.danger { background: none; color: var(--danger); border: 1px solid var(--danger); }
+  button.btn:disabled { opacity: .5; cursor: not-allowed; }
+  .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .keybox { background: var(--warn-bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin: 12px 0; }
+  .keybox code { word-break: break-all; display: block; margin: 8px 0; }
+  #message { min-height: 20px; margin-bottom: 12px; font-size: 13px; }
+  #message.ok { color: var(--ok); }
+  #message.error { color: var(--danger); }
+  .list-gap { height: 8px; }
+  .offscreen { position: fixed; left: -9999px; top: 0; }
+  #key-masked { word-break: break-all; align-self: center; }
+  h3 { margin: 0 0 4px; font-size: 15px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Conduit Admin</h1>
+  <span class="origin" id="origin"></span>
+  <nav class="tabs hidden" id="tabs" role="tablist">
+    <button class="tab" role="tab" id="tab-teams" data-tab="teams">Teams</button>
+    <button class="tab" role="tab" id="tab-models" data-tab="models">Models</button>
+  </nav>
+</header>
+
+<main>
+  <div id="message" role="status" aria-live="polite"></div>
+
+  <form class="gate" id="gate">
+    <h2>Admin key</h2>
+    <label for="admin-key">Enter the gateway's admin key. It stays in this page's memory only.</label>
+    <input type="password" id="admin-key" autocomplete="off" required>
+    <div class="actions"><button class="btn" id="btn-connect" type="submit">Connect</button></div>
+  </form>
+
+  <div class="panes hidden" id="app">
+    <section class="pane" id="list"></section>
+    <section class="pane" id="detail"></section>
+  </div>
+</main>
+
+<script nonce="__NONCE__">
+"use strict";
+
+// The admin key lives only in this variable: never written to any storage,
+// a URL, a log line or a message.
+let adminKey = null;
+
+// ---------- helpers shared by the Teams and Models tabs ----------
+
+// Builds a DOM node. Text children are always added as text nodes, so data
+// (team names, model names, error details) can never be parsed as markup.
+function el(tag, props, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props || {})) {
+    if (key === "className") node.className = value;
+    else if (key.startsWith("on") && typeof value === "function") node.addEventListener(key.slice(2), value);
+    else if (key === "value" || key === "checked" || key === "disabled") node[key] = value;
+    else if (value !== undefined && value !== null && value !== false) node.setAttribute(key, value === true ? "" : value);
+  }
+  for (const child of children.flat()) {
+    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+  return node;
+}
+
+// "sk-conduit-abcdef...wxyz" -> "sk-…wxyz" (never reveals more than the last 4 characters)
+function maskKey(key) {
+  return "sk-…" + String(key).slice(-4);
+}
+
+// Reads a number input. A blank or unparsable field is NaN (never silently 0,
+// which would turn an empty budget into "$0" or a typo'd cost into "free").
+function readNumber(input) {
+  const raw = input.value.trim();
+  if (raw === "" || (input.validity && input.validity.badInput)) return NaN;
+  return Number(raw);
+}
+
+function showMessage(text, kind) {
+  const box = document.getElementById("message");
+  box.textContent = text || "";
+  box.className = text ? kind : "";
+}
+
+// Calls the gateway's admin API. Throws Error(detail) on failure. A 401 clears
+// the key and returns to the gate; a network failure is reported plainly.
+async function api(method, path, body) {
+  let response;
+  try {
+    response = await fetch(path, {
+      method,
+      headers: Object.assign({ "X-Admin-Key": adminKey || "" }, body !== undefined ? { "Content-Type": "application/json" } : {}),
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch (networkError) {
+    throw new Error("Cannot reach the gateway. Is it running?");
+  }
+  let data = null;
+  try { data = await response.json(); } catch (notJson) { /* empty or non-JSON body */ }
+  if (response.status === 401) {
+    adminKey = null;
+    showGate();
+    throw new Error("Admin key rejected.");
+  }
+  if (!response.ok) {
+    const detail = data && data.detail;
+    throw new Error(typeof detail === "string" ? detail : "Request failed (" + response.status + ")");
+  }
+  return data;
+}
+
+// ---------- gate and tabs ----------
+
+const gate = document.getElementById("gate");
+const app = document.getElementById("app");
+const tabs = document.getElementById("tabs");
+let currentTab = "teams";
+
+function showGate() {
+  app.classList.add("hidden");
+  tabs.classList.add("hidden");
+  gate.classList.remove("hidden");
+  document.getElementById("admin-key").value = "";
+}
+
+function showApp() {
+  gate.classList.add("hidden");
+  app.classList.remove("hidden");
+  tabs.classList.remove("hidden");
+  selectTab(currentTab);
+}
+
+// ---------- Models tab ----------
+
+const PROVIDERS = ["openai", "anthropic", "gemini", "ollama"];
+let modelRegistry = [];     // cached registry; the Teams tab builds its checkboxes from it
+let selectedModel = null;   // name of the model being edited, or null when adding a new one
+
+// The page works in dollars per 1M tokens; the API stores dollars per token.
+const perMillionToPerToken = (usd) => usd / 1e6;
+const perTokenToPerMillion = (usd) => usd * 1e6;
+// 1.5e-7 per token -> "0.15" (toPrecision hides float noise such as 0.15000000000000002)
+const formatUsd = (usd) => String(Number(usd.toPrecision(10)));
+
+async function loadModels() {
+  modelRegistry = (await api("GET", "/admin/v1/models")).models;
+  return modelRegistry;
+}
+
+function renderModelList() {
+  document.getElementById("list").replaceChildren(
+    el("button", { className: "btn", id: "btn-add-model", onclick: () => { selectedModel = null; renderModelList(); renderModelForm(); } }, "+ Add model"),
+    el("div", { className: "list-gap" }),
+    ...modelRegistry.map((model) => el("button", {
+      className: "list-item", "data-name": model.name, "aria-current": String(model.name === selectedModel),
+      onclick: () => { selectedModel = model.name; renderModelList(); renderModelForm(); },
+    }, el("span", {}, model.name), el("span", { className: "tag" }, model.provider))),
+  );
+}
+
+function renderModelForm() {
+  const existing = modelRegistry.find((m) => m.name === selectedModel) || null;
+
+  const nameInput = el("input", { type: "text", id: "f-name", autocomplete: "off", value: existing ? existing.name : "", disabled: Boolean(existing) });
+  const providerSelect = el("select", { id: "f-provider" }, PROVIDERS.map((p) => el("option", { value: p }, p)));
+  providerSelect.value = existing ? existing.provider : "openai";
+  const tierInput = el("input", { type: "number", id: "f-tier", min: "1", step: "1", value: existing ? existing.tier : 1 });
+  const costIn = el("input", { type: "number", id: "f-cost-in", min: "0", step: "any", value: existing ? formatUsd(perTokenToPerMillion(existing.cost_per_input_token)) : "0" });
+  const costOut = el("input", { type: "number", id: "f-cost-out", min: "0", step: "any", value: existing ? formatUsd(perTokenToPerMillion(existing.cost_per_output_token)) : "0" });
+
+  // Local Ollama models are free: costs are forced to 0 and locked.
+  const syncCosts = () => {
+    const free = providerSelect.value === "ollama";
+    if (free) { costIn.value = "0"; costOut.value = "0"; }
+    costIn.disabled = free;
+    costOut.disabled = free;
+  };
+  providerSelect.addEventListener("change", syncCosts);
+  syncCosts();
+
+  const saveButton = el("button", { className: "btn", id: "btn-save", onclick: async () => {
+    const modelName = nameInput.value.trim();
+    const tier = readNumber(tierInput);
+    const inCost = readNumber(costIn);
+    const outCost = readNumber(costOut);
+    if (!modelName) return showMessage("Model name is required.", "error");
+    if (!Number.isInteger(tier) || tier < 1) return showMessage("Tier must be a whole number, 1 or higher.", "error");
+    if (!Number.isFinite(inCost) || inCost < 0 || !Number.isFinite(outCost) || outCost < 0) return showMessage("Costs must be zero or more.", "error");
+
+    const body = {
+      model_name: modelName, provider: providerSelect.value, tier,
+      cost_per_input_token: perMillionToPerToken(inCost), cost_per_output_token: perMillionToPerToken(outCost),
+    };
+    saveButton.disabled = true;
+    try {
+      if (existing) await api("PATCH", "/admin/v1/models/" + encodeURIComponent(existing.name), body);
+      else await api("POST", "/admin/v1/models", body);
+      await loadModels();
+      selectedModel = modelName;
+      renderModelList();
+      renderModelForm();
+      showMessage("Saved " + modelName + ".", "ok");
+    } catch (error) {
+      showMessage(error.message, "error");
+      saveButton.disabled = false;
+    }
+  } }, "Save");
+
+  const actions = el("div", { className: "actions" }, saveButton);
+  if (existing) {
+    actions.append(el("button", { className: "btn danger", id: "btn-delete", onclick: async (event) => {
+      const button = event.currentTarget;
+      const warning = "Delete model \"" + existing.name + "\"? Teams that still list it will lose access to it " +
+        "(their cached settings may take a moment to update).";
+      if (!confirm(warning)) return;
+      button.disabled = true;
+      try {
+        await api("DELETE", "/admin/v1/models/" + encodeURIComponent(existing.name));
+        await loadModels();
+        selectedModel = null;
+        renderModelList();
+        renderModelForm();
+        showMessage("Deleted " + existing.name + ".", "ok");
+      } catch (error) {
+        showMessage(error.message, "error");
+        button.disabled = false;
+      }
+    } }, "Delete model"));
+  }
+
+  document.getElementById("detail").replaceChildren(
+    el("h3", {}, existing ? existing.name : "Add model"),
+    el("label", { for: "f-name" }, "Model name (exactly as the provider calls it)"), nameInput,
+    el("div", { className: "row" },
+      el("div", {}, el("label", { for: "f-provider" }, "Provider"), providerSelect),
+      el("div", {}, el("label", { for: "f-tier" }, "Tier"), tierInput)),
+    el("div", { className: "hint" }, "Tier ranks capability for fallback: higher means more capable."),
+    el("div", { className: "row" },
+      el("div", {}, el("label", { for: "f-cost-in" }, "Cost per 1M input tokens ($)"), costIn),
+      el("div", {}, el("label", { for: "f-cost-out" }, "Cost per 1M output tokens ($)"), costOut)),
+    el("div", { className: "hint" }, "Ollama models run locally, so their cost is always $0."),
+    actions,
+  );
+}
+
+async function renderModels() {
+  selectedModel = null;
+  await loadModels();
+  renderModelList();
+  renderModelForm();
+}
+
+// ---------- Teams tab ----------
+
+let teamList = [];
+let selectedTeamKey = null;   // api_key of the team shown, or null while creating a new one
+let justCreated = null;       // { apiKey }: the one-time "copy it now" box, cleared when the selection changes
+
+// 32 random bytes (256 bits), URL-safe base64 without padding: safe inside a URL path.
+function generateApiKey() {
+  if (!(window.crypto && window.crypto.getRandomValues)) {
+    throw new Error("This browser cannot generate secure random keys.");
+  }
+  const bytes = new Uint8Array(32);
+  window.crypto.getRandomValues(bytes);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return "sk-conduit-" + btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function slugify(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+// Only the fields that differ, so PATCH sends the minimum.
+function changedFields(original, edited) {
+  const changed = {};
+  if (edited.team_name !== original.team_name) changed.team_name = edited.team_name;
+  if ([...edited.allowed_models].sort().join("\n") !== [...original.allowed_models].sort().join("\n")) {
+    changed.allowed_models = edited.allowed_models;
+  }
+  if (edited.rate_limit !== original.rate_limit) changed.rate_limit = edited.rate_limit;
+  if (edited.budget_limit !== original.budget_limit) changed.budget_limit = edited.budget_limit;
+  return changed;
+}
+
+async function loadTeams() {
+  teamList = (await api("GET", "/admin/v1/teams")).teams;
+  return teamList;
+}
+
+// navigator.clipboard only exists in secure contexts (HTTPS or localhost), so on a
+// plain-HTTP private address fall back to the legacy copy command.
+function legacyCopy(text) {
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.className = "offscreen";
+  document.body.append(area);
+  area.select();
+  let copied = false;
+  try { copied = document.execCommand("copy"); } catch (legacyError) { copied = false; }
+  area.remove();
+  return copied;
+}
+
+async function copyText(text, label) {
+  let copied = false;
+  if (navigator.clipboard && window.isSecureContext !== false) {
+    try { await navigator.clipboard.writeText(text); copied = true; } catch (clipboardError) { copied = false; }
+  }
+  if (!copied) copied = legacyCopy(text);
+  showMessage(copied ? label + " copied." : "Could not copy automatically. Use Show key and copy it by hand.", copied ? "ok" : "error");
+}
+
+// Checkboxes for every registered model, plus any model the team lists that is
+// no longer in the registry (shown checked and labelled so it can be removed).
+function buildModelChecklist(selected, onChange) {
+  const registered = modelRegistry.map((m) => m.name);
+  const missing = selected.filter((name) => !registered.includes(name));
+  const box = el("div", { className: "checks" });
+  const inputs = [];
+  for (const name of [...registered, ...missing]) {
+    const input = el("input", { type: "checkbox", className: "model-check", "data-model": name, checked: selected.includes(name), onchange: onChange });
+    inputs.push(input);
+    box.append(el("label", {}, input, missing.includes(name) ? name + " (not in registry)" : name));
+  }
+  return { node: box, selected: () => inputs.filter((i) => i.checked).map((i) => i.dataset.model) };
+}
+
+function renderTeamList() {
+  document.getElementById("list").replaceChildren(
+    el("button", { className: "btn", id: "btn-new-team", onclick: () => { selectedTeamKey = null; justCreated = null; renderTeamList(); renderTeamForm(); } }, "+ New team"),
+    el("div", { className: "list-gap" }),
+    ...teamList.map((team) => el("button", {
+      className: "list-item", "data-key": team.api_key, "aria-current": String(team.api_key === selectedTeamKey),
+      onclick: () => { selectedTeamKey = team.api_key; justCreated = null; renderTeamList(); renderTeamForm(); },
+    }, el("span", {}, team.team_name), el("span", { className: "tag" }, team.allowed_models.length + " models"))),
+  );
+}
+
+function renderTeamForm() {
+  const team = teamList.find((t) => t.api_key === selectedTeamKey) || null;
+  if (team) renderExistingTeam(team);
+  else renderNewTeam();
+}
+
+function renderExistingTeam(team) {
+  const nameInput = el("input", { type: "text", id: "f-team-name", autocomplete: "off", value: team.team_name });
+  const rateInput = el("input", { type: "number", id: "f-rate", min: "1", step: "1", value: team.rate_limit });
+  const budgetInput = el("input", { type: "number", id: "f-budget", min: "0", step: "any", value: team.budget_limit });
+  const checklist = buildModelChecklist(team.allowed_models, () => refresh());
+
+  const edited = () => ({
+    team_name: nameInput.value.trim(), allowed_models: checklist.selected(),
+    rate_limit: readNumber(rateInput), budget_limit: readNumber(budgetInput),
+  });
+  const saveButton = el("button", { className: "btn", id: "btn-save", disabled: true, onclick: async () => {
+    const values = edited();
+    if (!values.team_name) return showMessage("Team name is required.", "error");
+    if (!Number.isInteger(values.rate_limit) || values.rate_limit < 1) return showMessage("Rate limit must be a whole number, 1 or higher.", "error");
+    if (!Number.isFinite(values.budget_limit) || values.budget_limit < 0) return showMessage("Budget must be zero or more.", "error");
+    saveButton.disabled = true;
+    try {
+      await api("PATCH", "/admin/v1/teams/" + encodeURIComponent(team.api_key), changedFields(team, values));
+      await loadTeams();   // re-read: the PATCH response has cache-typed values (numbers as strings)
+      renderTeamList();
+      renderTeamForm();
+      showMessage("Saved " + values.team_name + ".", "ok");
+    } catch (error) {
+      showMessage(error.message, "error");
+      refresh();
+    }
+  } }, "Save");
+  const refresh = () => { saveButton.disabled = Object.keys(changedFields(team, edited())).length === 0; };
+  for (const input of [nameInput, rateInput, budgetInput]) input.addEventListener("input", refresh);
+
+  const children = [el("h3", {}, team.team_name), el("div", { className: "hint" }, "team id: " + team.team_id)];
+  if (justCreated && justCreated.apiKey === team.api_key) {
+    children.push(el("div", { className: "keybox", id: "keybox" },
+      el("strong", {}, "Copy this key now. It won't be shown in full again."),
+      el("code", { id: "keybox-key" }, team.api_key),
+      el("button", { className: "btn", id: "btn-copy-new-key", onclick: () => copyText(team.api_key, "Key") }, "Copy key")));
+  }
+  children.push(
+    el("label", {}, "API key"),
+    el("div", { className: "row" },
+      el("span", { id: "key-masked" }, maskKey(team.api_key)),
+      el("button", { className: "btn secondary", id: "btn-copy-key", onclick: () => copyText(team.api_key, "Key") }, "Copy"),
+      el("button", { className: "btn secondary", id: "btn-show-key", onclick: (event) => {
+        const shown = document.getElementById("key-masked");
+        const revealed = shown.dataset.revealed === "true";
+        shown.textContent = revealed ? maskKey(team.api_key) : team.api_key;
+        shown.dataset.revealed = String(!revealed);
+        event.currentTarget.textContent = revealed ? "Show key" : "Hide key";
+      } }, "Show key")),
+    el("label", { for: "f-team-name" }, "Team name"), nameInput,
+    el("label", {}, "Allowed models"), checklist.node,
+    el("div", { className: "row" },
+      el("div", {}, el("label", { for: "f-rate" }, "Rate limit (requests per minute)"), rateInput),
+      el("div", {}, el("label", { for: "f-budget" }, "Budget ($)"), budgetInput)),
+    el("div", { className: "hint" }, "Budget period: " + team.budget_period + " · spent so far: $" + team.current_spend.toFixed(4)),
+    el("div", { className: "actions" }, saveButton,
+      el("button", { className: "btn danger", id: "btn-revoke", onclick: async (event) => {
+        if (!confirm("Revoke \"" + team.team_name + "\"? Its API key stops working immediately.")) return;
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+          await api("DELETE", "/admin/v1/teams/" + encodeURIComponent(team.api_key));
+          await loadTeams();
+          selectedTeamKey = null;
+          renderTeamList();
+          renderTeamForm();
+          showMessage("Revoked " + team.team_name + ".", "ok");
+        } catch (error) {
+          showMessage(error.message, "error");
+          button.disabled = false;
+        }
+      } }, "Revoke team")),
+  );
+  document.getElementById("detail").replaceChildren(...children);
+}
+
+function renderNewTeam() {
+  let idEdited = false;
+  const nameInput = el("input", { type: "text", id: "f-team-name", autocomplete: "off" });
+  const idInput = el("input", { type: "text", id: "f-team-id", autocomplete: "off" });
+  const keyInput = el("input", { type: "text", id: "f-key", readonly: true, placeholder: "Click Generate" });
+  const rateInput = el("input", { type: "number", id: "f-rate", min: "1", step: "1", value: 60 });
+  const budgetInput = el("input", { type: "number", id: "f-budget", min: "0", step: "any", value: 5 });
+  const checklist = buildModelChecklist([], () => {});
+
+  nameInput.addEventListener("input", () => { if (!idEdited) idInput.value = slugify(nameInput.value); });
+  idInput.addEventListener("input", () => { idEdited = true; });
+
+  const createButton = el("button", { className: "btn", id: "btn-create", onclick: async () => {
+    const body = {
+      api_key: keyInput.value, team_id: idInput.value.trim(), team_name: nameInput.value.trim(),
+      allowed_models: checklist.selected(), rate_limit: readNumber(rateInput),
+      budget_limit: readNumber(budgetInput), budget_period: "monthly",
+    };
+    if (!body.team_name) return showMessage("Team name is required.", "error");
+    if (!body.team_id) return showMessage("Team id is required (letters and numbers).", "error");
+    if (!body.api_key) return showMessage("Generate an API key first.", "error");
+    if (body.allowed_models.length === 0) return showMessage("Pick at least one model.", "error");
+    if (!Number.isInteger(body.rate_limit) || body.rate_limit < 1) return showMessage("Rate limit must be a whole number, 1 or higher.", "error");
+    if (!Number.isFinite(body.budget_limit) || body.budget_limit < 0) return showMessage("Budget must be zero or more.", "error");
+    createButton.disabled = true;
+    try {
+      await api("POST", "/admin/v1/teams", body);
+    } catch (error) {
+      showMessage(error.message, "error");
+      createButton.disabled = false;
+      return;
+    }
+    try {
+      await loadTeams();
+    } catch (reloadError) {
+      // The team now exists. Keep Create disabled (a retry would collide with it) and
+      // leave the form up: the generated key is still in it for the operator to copy.
+      showMessage("Team created, but the list could not be refreshed. Copy the key from the form, then switch tabs to reload.", "error");
+      return;
+    }
+    selectedTeamKey = body.api_key;
+    justCreated = { apiKey: body.api_key };
+    renderTeamList();
+    renderTeamForm();
+    showMessage("Created " + body.team_name + ".", "ok");
+  } }, "Create");
+
+  document.getElementById("detail").replaceChildren(
+    el("h3", {}, "New team"),
+    el("label", { for: "f-team-name" }, "Team name"), nameInput,
+    el("label", { for: "f-team-id" }, "Team id"), idInput,
+    el("label", { for: "f-key" }, "API key"),
+    el("div", { className: "row" }, keyInput,
+      el("button", { className: "btn secondary", id: "btn-generate", onclick: () => {
+        try { keyInput.value = generateApiKey(); } catch (error) { showMessage(error.message, "error"); }
+      } }, "Generate")),
+    el("label", {}, "Allowed models"), checklist.node,
+    el("div", { className: "row" },
+      el("div", {}, el("label", { for: "f-rate" }, "Rate limit (requests per minute)"), rateInput),
+      el("div", {}, el("label", { for: "f-budget" }, "Budget ($ per month)"), budgetInput)),
+    el("div", { className: "actions" }, createButton),
+  );
+}
+
+async function renderTeams() {
+  selectedTeamKey = null;
+  justCreated = null;
+  await Promise.all([loadModels(), loadTeams()]);
+  renderTeamList();
+  renderTeamForm();
+}
+
+async function selectTab(name) {
+  currentTab = name;
+  for (const button of tabs.querySelectorAll(".tab")) {
+    button.setAttribute("aria-selected", String(button.dataset.tab === name));
+  }
+  showMessage("", "");
+  try {
+    await (name === "models" ? renderModels() : renderTeams());
+  } catch (error) {
+    showMessage(error.message, "error");
+  }
+}
+
+for (const button of tabs.querySelectorAll(".tab")) {
+  button.addEventListener("click", () => selectTab(button.dataset.tab));
+}
+
+let connecting = false;
+gate.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (connecting) return;
+  connecting = true;
+  const connectButton = document.getElementById("btn-connect");
+  connectButton.disabled = true;
+  adminKey = document.getElementById("admin-key").value;
+  showMessage("Connecting…", "ok");
+  try {
+    await api("GET", "/admin/v1/models");   // cheap call that validates the key
+    showMessage("", "");
+    showApp();
+  } catch (error) {
+    adminKey = null;
+    showMessage(error.message, "error");
+  } finally {
+    connecting = false;
+    connectButton.disabled = false;
+  }
+});
+
+document.getElementById("origin").textContent = "gateway: " + location.host;
+</script>
+</body>
+</html>

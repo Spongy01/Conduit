@@ -167,14 +167,22 @@ curl http://localhost:8000/api/v1/models -H "Authorization: Bearer team-key-abc"
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `GET` | `/admin/v1/teams` | List all teams (full keys included; admin only) |
 | `POST` | `/admin/v1/teams` | Create a team |
 | `PATCH` | `/admin/v1/teams/{api_key}` | Update team config |
 | `DELETE` | `/admin/v1/teams/{api_key}` | Revoke a team |
+| `GET` | `/admin/v1/models` | List registered models with pricing |
 | `POST` | `/admin/v1/models` | Register a model |
 | `PATCH` | `/admin/v1/models/{model_name}` | Update model metadata |
 | `DELETE` | `/admin/v1/models/{model_name}` | Remove a model |
 
 All admin endpoints require the `X-Admin-Key` header.
+
+### Admin page
+
+`GET /admin/ui` serves a small web page for managing teams and models without `curl`: list/create teams (it generates a strong random API key and shows it in full once), tick which models a team may use, edit rate limit and budget, revoke a team, and add/edit/delete models (costs entered per 1M tokens; Ollama models are free).
+
+Open `http://localhost:8000/admin/ui` and enter the admin key (kept in the page's memory only; reloading asks again). On a deployed gateway, reach it over an SSH tunnel or a private network such as a Tailscale tailnet, **never through the public URL**: the public front door should forward only `/api/v1/chat/completion` and `/api/v1/models`. The page loads no external scripts or fonts and is served with a strict Content-Security-Policy.
 
 ### Request limits
 
