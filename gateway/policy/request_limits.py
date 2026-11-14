@@ -19,6 +19,7 @@ DEFAULTS = {
     "MAX_REQUEST_BYTES": 1_000_000,
     "MAX_PROMPT_CHARS": 100_000,
     "MAX_MESSAGES": 200,
+    "MAX_OUTPUT_TOKENS": 4096,
 }
 
 _BODY_METHODS = {"POST", "PUT", "PATCH"}
@@ -56,6 +57,17 @@ def raise_if_chat_too_large(request: ChatCompletionRequest) -> None:
     if total_chars > max_chars:
         raise HTTPException(status_code=413,
                             detail=f"Prompt too large: {total_chars} characters (limit {max_chars})")
+
+
+def apply_output_ceiling(request: ChatCompletionRequest) -> None:
+    """Clamps a caller-supplied max_tokens down to MAX_OUTPUT_TOKENS. An unset
+    max_tokens is left alone here: paid providers apply their own small
+    default, and the Ollama provider applies this same ceiling itself (so a
+    local model can't be asked to generate without end). Clamping, not
+    rejecting, keeps well-meaning clients working."""
+    ceiling = get_limit("MAX_OUTPUT_TOKENS")
+    if request.max_tokens is not None and request.max_tokens > ceiling:
+        request.max_tokens = ceiling
 
 
 class RequestBodyLimitMiddleware:

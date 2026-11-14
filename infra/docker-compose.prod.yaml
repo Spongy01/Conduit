@@ -7,6 +7,7 @@ services:
       MAX_REQUEST_BYTES: "200000"
       MAX_PROMPT_CHARS: "24000"
       MAX_MESSAGES: "100"
+      MAX_OUTPUT_TOKENS: "1024"
   grafana:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD and pass --env-file .env}

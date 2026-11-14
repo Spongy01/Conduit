@@ -2,6 +2,7 @@ from gateway.providers.BaseProvider import BaseProvider
 from gateway.core.schema import ChatCompletionRequest, ChatCompletionResponse, Usage
 from gateway.core.tokens import estimate_tokens
 from gateway.core.tracer import tracer
+from gateway.policy.request_limits import get_limit
 from typing import AsyncGenerator
 import httpx
 import json
@@ -35,10 +36,11 @@ class OllamaProvider(BaseProvider):
             "think": False,
             "options": {"temperature": temperature},
         }
-        # Only cap output when the caller asked for it; local models are free,
-        # so by default they run to completion.
-        if request.max_tokens is not None:
-            payload["options"]["num_predict"] = request.max_tokens
+        # Local models are free but not unlimited (they tie up the host), so
+        # unset max_tokens gets the server-side ceiling instead of "no cap".
+        payload["options"]["num_predict"] = (
+            request.max_tokens if request.max_tokens is not None else get_limit("MAX_OUTPUT_TOKENS")
+        )
 
         input_text = " ".join(m.content for m in request.messages)
         input_token_estimate = estimate_tokens(input_text)

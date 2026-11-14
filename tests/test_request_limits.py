@@ -13,7 +13,9 @@ from gateway.core.database import db as app_db
 from gateway.core.providers import PROVIDERS
 from gateway.core.redis_client import redis_client
 from gateway.main import app
-from gateway.policy.request_limits import get_limit
+from gateway.api import chat as chat_module
+from gateway.core.schema import ChatCompletionRequest, Message
+from gateway.policy.request_limits import apply_output_ceiling, get_limit
 
 from tests.test_provider_usage import _run_app, _stop_app
 from tests.dummy_providers.openai_dummy import app as openai_app
@@ -230,10 +232,53 @@ def test_invalid_values_fall_back_to_default(monkeypatch, caplog, raw):
 
 
 def test_defaults_and_overrides(monkeypatch):
-    for name in ("MAX_REQUEST_BYTES", "MAX_PROMPT_CHARS", "MAX_MESSAGES"):
+    for name in ("MAX_REQUEST_BYTES", "MAX_PROMPT_CHARS", "MAX_MESSAGES", "MAX_OUTPUT_TOKENS"):
         monkeypatch.delenv(name, raising=False)
+    assert get_limit("MAX_OUTPUT_TOKENS") == 4096
     assert get_limit("MAX_REQUEST_BYTES") == 1000000
     assert get_limit("MAX_PROMPT_CHARS") == 100000
     assert get_limit("MAX_MESSAGES") == 200
     monkeypatch.setenv("MAX_MESSAGES", "7")
     assert get_limit("MAX_MESSAGES") == 7
+
+
+# --- MAX_OUTPUT_TOKENS ------------------------------------------------------
+
+def _req(max_tokens):
+    return ChatCompletionRequest(model="m", messages=[Message(role="user", content="hi")], max_tokens=max_tokens)
+
+
+def test_ceiling_clamps_larger_request(monkeypatch):
+    monkeypatch.setenv("MAX_OUTPUT_TOKENS", "100")
+    request = _req(5000)
+    apply_output_ceiling(request)
+    assert request.max_tokens == 100
+
+
+def test_ceiling_leaves_smaller_or_unset_alone(monkeypatch):
+    monkeypatch.setenv("MAX_OUTPUT_TOKENS", "100")
+    small, unset = _req(40), _req(None)
+    apply_output_ceiling(small)
+    apply_output_ceiling(unset)
+    assert small.max_tokens == 40
+    assert unset.max_tokens is None  # paid providers keep their own default; Ollama applies the ceiling itself
+
+
+async def test_handler_clamps_max_tokens_before_routing(db_conn, app_client, openai_dummy_url, monkeypatch):
+    api_key = await _seed(db_conn)
+    monkeypatch.setenv("MAX_OUTPUT_TOKENS", "100")
+    seen = {}
+    real_route = chat_module.route_request
+
+    async def spy(request, team):
+        seen["max_tokens"] = request.max_tokens
+        return await real_route(request, team)
+
+    monkeypatch.setattr(chat_module, "route_request", spy)
+    response = await app_client.post(
+        "/api/v1/chat/completion",
+        json={"model": MODEL, "messages": [_msg("hi")], "max_tokens": 999999},
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert response.status_code == 200
+    assert seen["max_tokens"] == 100

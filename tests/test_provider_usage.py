@@ -261,9 +261,10 @@ async def _captured_ollama_payload(max_tokens):
     return seen
 
 
-async def test_ollama_omits_num_predict_when_max_tokens_unset():
+async def test_ollama_caps_output_at_server_ceiling_when_max_tokens_unset(monkeypatch):
+    monkeypatch.setenv("MAX_OUTPUT_TOKENS", "321")
     body = await _captured_ollama_payload(max_tokens=None)
-    assert "num_predict" not in body["options"]
+    assert body["options"]["num_predict"] == 321
 
 
 async def test_ollama_disables_thinking():

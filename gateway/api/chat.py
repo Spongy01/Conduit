@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from gateway.auth.authenticate import authenticate
 from gateway.policy.model_access import raise_if_model_not_allowed
 from gateway.policy.rate_limiter import check_rate_limit
-from gateway.policy.request_limits import raise_if_chat_too_large
+from gateway.policy.request_limits import apply_output_ceiling, raise_if_chat_too_large
 from gateway.policy.budget import settle_budget
 from gateway.router.router import route_request, NoProviderAvailableError
 from gateway.core import metrics
@@ -150,6 +150,7 @@ async def chat_completion(request: ChatCompletionRequest,
         # so a rejected request consumes neither. Raised inside the try so the
         # metrics below record it as http_413 and the inflight gauge drops.
         raise_if_chat_too_large(request)
+        apply_output_ceiling(request)
 
         ##############
         # Rate limiting logic
