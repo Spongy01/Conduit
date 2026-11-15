@@ -10,15 +10,19 @@ Placeholders used below: `<mac-ip>` = your Mac's Tailscale IP (`100.x.y.z`); `<g
 
 ## 0. Before you start
 
-- [ ] AWS account with **MFA on the root user**, and an everyday IAM/Identity Center user for the console.
-- [ ] **Billing alerts first** (§1), before creating any resource.
+- [ ] AWS account signed in, **MFA on** for the login that owns it.
+- [ ] You know your remaining credit (§1). **Do not click Upgrade / Activate** anywhere: on this account type that removes the credit cap and cannot be undone.
 - [ ] Tailscale account; the Mac has the Tailscale app installed and signed in; Funnel confirmed available.
 - [ ] The three models pulled on the Mac: `ollama pull qwen3.5:9b qwen3.5:4b gemma4:e4b` (one per command if your Ollama version wants it).
 - [ ] This repo on your Mac (you will copy it to the instance in §5).
 
-## 1. Budget alerts (AWS console, root or a billing-enabled user)
+## 1. Spending safety (this is a free-plan account)
 
-Billing and Cost Management → Budgets → Create budget → *Cost budget*, monthly, fixed amount. Make three: **$25**, **$50**, **$80**, each emailing you at 100% of actual spend (also add an alert at 100% *forecasted* on the $50 one). **[verify]** that your user can see Billing (IAM users need billing access turned on by the root user).
+This account is on AWS's free plan: a **$100 credit** that ends around **6 May 2027** (check the exact date and balance on the Billing page), and no real charges unless you upgrade. So there are no budget alerts to set up (Budgets needs the upgrade this plan avoids); the credit itself is the cap. What to do instead:
+
+- Look at the **credit balance** on the Billing page at the start and end of every session.
+- Budget your *runtime*: `c7i-flex.large` costs about $0.085/hour, plus ~$0.005/hour for the public IP while running and ~$2.40/month for the disk, so the credit is **about 1,000 running hours**. Leaving the instance on 24/7 would use it in ~6 weeks; stop it between sessions (§11 auto-stop is the backstop).
+- When the credit or the date runs out, the account's resources go away. This is a demo-length deployment.
 
 ## 2. Tailscale policy (do this *before* the instance joins)
 
@@ -82,7 +86,7 @@ Check from the Mac itself: `curl http://<mac-ip>:11434/api/tags` lists your mode
 2. **EC2 → Launch instance**:
    - Name: `conduit-gateway`
    - AMI: **Ubuntu Server 24.04 LTS**, architecture **x86_64**
-   - Type: **t3.medium**
+   - Type: **c7i-flex.large** (2 vCPU, 4 GiB; the only free-tier-eligible type with 4 GiB that this account offered). Region: **us-east-2 (Ohio)**, the only one this account offers.
    - Key pair: **Proceed without a key pair** (you will use Tailscale SSH / SSM).
    - Network settings → Edit: create a new security group; **delete every inbound rule** (the console proposes SSH from anywhere: remove it). Leave "Auto-assign public IP" **enabled** (the instance needs outbound internet).
    - Storage: **30 GiB gp3**.
@@ -166,7 +170,12 @@ docker compose --env-file .env -f infra/docker-compose.yaml -f infra/docker-comp
 
 Expected: gateway, postgres, redis, prometheus, grafana, otel-collector, tempo, nginx all `running`. The `dummy`, `seed` and `locust` profiles are **not** started, which is what you want. **Never run the `seed` profile here** (it creates guessable team keys).
 
-Check memory headroom once: `docker stats --no-stream` and `free -m` (if the instance is short of RAM, move to `t3.large`).
+Check memory headroom once: `docker stats --no-stream` and `free -m`. If it is tight, add a swap file as a safety net:
+
+```sh
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
 
 Local smoke test on the instance:
 
@@ -273,5 +282,4 @@ systemctl list-timers conduit-autostop.timer     # shows when it will fire
 1. EC2 → disable termination protection → **Terminate** the instance (this deletes the root volume if "delete on termination" was left on **[verify]**).
 2. EC2 → Volumes and Snapshots: make sure nothing is left behind. Delete the security group and the `conduit-ec2-ssm` role.
 3. Tailscale console: remove the `conduit-gateway` machine; remove the `tag:conduit-gateway` rules, and the `tailscale serve` entry on the Mac (`tailscale serve reset`).
-4. Delete the three Budgets (or keep one as a safety net).
-5. Look at the AWS billing page the next day and the day after; it should show nothing running.
+4. Look at the AWS billing page the next day and the day after; it should show nothing running and the credit no longer dropping.
